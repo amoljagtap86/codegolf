@@ -3,7 +3,6 @@
 		var sum = 0;
 		var digitDifferences = [];
 		getDigitDifference(number, digitDifferences);
-		console.log(digitDifferences);
 		
 		for(n in digitDifferences){
 			sum +=	digitDifferences[n];	
