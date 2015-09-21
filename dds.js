@@ -1,12 +1,11 @@
 	(function(){
 		var number = new Number(8675309);
-		var sum = 0;
 		var digitDifferences = [];
 		getDigitDifference(number, digitDifferences);
 		
-		for(n in digitDifferences){
-			sum +=	digitDifferences[n];	
-		}
+		var sum = digitDifferences.reduce(function(initial, current){
+			return initial + current; 
+		}, 0);
 
 		console.log("sum: " + sum);
 
