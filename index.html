@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DentaCare — Appointment Manager</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue-dark:  #1a3d6e;
+    --blue:       #2563eb;
+    --blue-light: #dbeafe;
+    --teal:       #0d9488;
+    --teal-light: #ccfbf1;
+    --bg:         #f0f4f8;
+    --white:      #ffffff;
+    --card:       #ffffff;
+    --border:     #e2e8f0;
+    --text:       #1e293b;
+    --muted:      #64748b;
+    --red:        #dc2626;
+    --red-light:  #fee2e2;
+    --green:      #16a34a;
+    --green-light:#dcfce7;
+    --amber:      #d97706;
+    --amber-light:#fef3c7;
+    --shadow:     0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+    --shadow-lg:  0 10px 25px rgba(0,0,0,.12);
+    --radius:     12px;
+    --radius-sm:  8px;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  .layout { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 240px; flex-shrink: 0;
+    background: var(--blue-dark);
+    color: #fff;
+    display: flex; flex-direction: column;
+    position: fixed; top: 0; left: 0; height: 100vh;
+    z-index: 100;
+  }
+
+  .sidebar-brand {
+    padding: 24px 20px 20px;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+  }
+  .sidebar-brand h1 { font-size: 1.3rem; font-weight: 700; letter-spacing: -.3px; }
+  .sidebar-brand span { color: #7dd3fc; }
+  .sidebar-brand p { font-size: .72rem; color: #94a3b8; margin-top: 2px; }
+
+  .sidebar-nav { flex: 1; padding: 16px 0; }
+  .nav-section { padding: 8px 20px 4px; font-size: .68rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 20px; cursor: pointer; font-size: .875rem;
+    color: #cbd5e1; border-left: 3px solid transparent;
+    transition: all .15s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,.06); color: #fff; }
+  .nav-item.active { background: rgba(255,255,255,.1); color: #fff; border-left-color: #7dd3fc; }
+  .nav-item svg { width: 17px; height: 17px; flex-shrink: 0; }
+
+  .sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid rgba(255,255,255,.1);
+    font-size: .78rem; color: #94a3b8;
+  }
+  .sidebar-footer strong { display: block; color: #e2e8f0; font-size: .82rem; }
+
+  /* ── Main ── */
+  .main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; }
+
+  .topbar {
+    background: var(--white); border-bottom: 1px solid var(--border);
+    padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 50;
+  }
+  .topbar-title { font-size: 1.15rem; font-weight: 700; color: var(--text); }
+  .topbar-title span { color: var(--muted); font-weight: 400; font-size: .9rem; margin-left: 8px; }
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--blue); color: #fff; border: none;
+    padding: 9px 18px; border-radius: var(--radius-sm);
+    font-size: .875rem; font-weight: 600; cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-primary:active { transform: scale(.98); }
+  .btn-primary svg { width: 16px; height: 16px; }
+
+  .content { padding: 28px; flex: 1; }
+
+  /* ── Dashboard Cards ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 28px; }
+
+  .stat-card {
+    background: var(--card); border-radius: var(--radius);
+    padding: 20px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 12px;
+    border: 1px solid var(--border);
+    transition: box-shadow .2s;
+  }
+  .stat-card:hover { box-shadow: var(--shadow-lg); }
+  .stat-card-header { display: flex; align-items: center; justify-content: space-between; }
+  .stat-label { font-size: .78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); }
+  .stat-icon {
+    width: 38px; height: 38px; border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stat-icon svg { width: 20px; height: 20px; }
+  .stat-icon.blue { background: var(--blue-light); color: var(--blue); }
+  .stat-icon.teal { background: var(--teal-light); color: var(--teal); }
+  .stat-icon.green { background: var(--green-light); color: var(--green); }
+  .stat-icon.amber { background: var(--amber-light); color: var(--amber); }
+  .stat-value { font-size: 2rem; font-weight: 800; line-height: 1; }
+  .stat-sub { font-size: .75rem; color: var(--muted); }
+
+  /* ── Filters ── */
+  .filters-bar {
+    background: var(--card); border-radius: var(--radius);
+    padding: 16px 20px; box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .filter-group { display: flex; align-items: center; gap: 8px; }
+  .filter-group label { font-size: .8rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .filter-input, .filter-select {
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 7px 11px; font-size: .83rem; color: var(--text);
+    background: var(--white); outline: none; transition: border-color .15s;
+  }
+  .filter-input:focus, .filter-select:focus { border-color: var(--blue); }
+  .filter-input { min-width: 150px; }
+  .btn-ghost {
+    background: none; border: 1px solid var(--border);
+    padding: 7px 14px; border-radius: var(--radius-sm);
+    font-size: .83rem; font-weight: 500; cursor: pointer; color: var(--muted);
+    transition: all .15s;
+  }
+  .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+
+  /* ── Table / List ── */
+  .table-card {
+    background: var(--card); border-radius: var(--radius);
+    box-shadow: var(--shadow); border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .table-header {
+    padding: 16px 20px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-title { font-size: .95rem; font-weight: 700; }
+  .table-count { font-size: .8rem; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    padding: 10px 16px; font-size: .75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    background: #f8fafc; text-align: left; border-bottom: 1px solid var(--border);
+  }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody td { padding: 13px 16px; font-size: .875rem; vertical-align: middle; }
+
+  .patient-cell { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .78rem; font-weight: 700; flex-shrink: 0;
+  }
+  .patient-name { font-weight: 600; }
+  .patient-id { font-size: .72rem; color: var(--muted); }
+
+  /* Status Badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.scheduled { background: var(--blue-light); color: var(--blue); }
+  .badge.completed  { background: var(--green-light); color: var(--green); }
+  .badge.cancelled  { background: var(--red-light); color: var(--red); }
+
+  /* Treatment chip */
+  .treatment-chip {
+    display: inline-block; padding: 3px 9px; border-radius: var(--radius-sm);
+    font-size: .75rem; font-weight: 500; background: #f1f5f9; color: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  /* Actions */
+  .actions { display: flex; gap: 6px; }
+  .btn-icon {
+    width: 30px; height: 30px; border-radius: var(--radius-sm);
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); background: none; cursor: pointer;
+    color: var(--muted); transition: all .15s;
+  }
+  .btn-icon:hover.edit  { border-color: var(--blue); color: var(--blue); background: var(--blue-light); }
+  .btn-icon:hover.cancel { border-color: var(--red); color: var(--red); background: var(--red-light); }
+  .btn-icon svg { width: 14px; height: 14px; }
+
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--muted);
+  }
+  .empty-state svg { width: 48px; height: 48px; margin: 0 auto 12px; opacity: .3; display: block; }
+  .empty-state p { font-size: .9rem; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.5);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200; padding: 20px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+
+  .modal {
+    background: var(--white); border-radius: var(--radius);
+    box-shadow: var(--shadow-lg); width: 100%; max-width: 540px;
+    max-height: 90vh; overflow-y: auto;
+    transform: translateY(16px) scale(.98);
+    transition: transform .2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0) scale(1); }
+
+  .modal-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-header h2 { font-size: 1.05rem; font-weight: 700; }
+  .modal-close {
+    width: 30px; height: 30px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: none; cursor: pointer;
+    color: var(--muted); display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; transition: all .15s;
+  }
+  .modal-close:hover { background: var(--red-light); color: var(--red); border-color: var(--red); }
+
+  .modal-body { padding: 20px 24px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group.full { grid-column: 1 / -1; }
+  .form-group label { font-size: .8rem; font-weight: 600; color: var(--muted); }
+  .form-control {
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 9px 12px; font-size: .875rem; color: var(--text);
+    background: var(--white); outline: none; transition: border-color .15s, box-shadow .15s;
+    font-family: inherit; width: 100%;
+  }
+  .form-control:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+  textarea.form-control { resize: vertical; min-height: 80px; }
+  .form-control.error { border-color: var(--red); }
+  .error-msg { font-size: .72rem; color: var(--red); }
+
+  .modal-footer {
+    padding: 16px 24px 20px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 10px; justify-content: flex-end;
+  }
+  .btn-secondary {
+    background: none; border: 1px solid var(--border);
+    padding: 9px 18px; border-radius: var(--radius-sm);
+    font-size: .875rem; font-weight: 600; cursor: pointer; color: var(--muted);
+    transition: all .15s;
+  }
+  .btn-secondary:hover { border-color: var(--blue); color: var(--blue); }
+
+  /* Confirm dialog */
+  .confirm-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,.5);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 300; padding: 20px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .confirm-overlay.open { opacity: 1; pointer-events: all; }
+  .confirm-box {
+    background: var(--white); border-radius: var(--radius); padding: 28px 24px;
+    max-width: 380px; width: 100%; box-shadow: var(--shadow-lg);
+    text-align: center;
+    transform: scale(.96); transition: transform .2s;
+  }
+  .confirm-overlay.open .confirm-box { transform: scale(1); }
+  .confirm-icon { width: 52px; height: 52px; background: var(--red-light); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+  .confirm-icon svg { width: 26px; height: 26px; color: var(--red); }
+  .confirm-box h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+  .confirm-box p { font-size: .875rem; color: var(--muted); margin-bottom: 20px; }
+  .confirm-btns { display: flex; gap: 10px; justify-content: center; }
+  .btn-danger {
+    background: var(--red); color: #fff; border: none;
+    padding: 9px 20px; border-radius: var(--radius-sm);
+    font-size: .875rem; font-weight: 600; cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-danger:hover { background: #b91c1c; }
+
+  /* Toast */
+  .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 500;
+    display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    background: var(--text); color: #fff;
+    padding: 12px 18px; border-radius: var(--radius-sm);
+    font-size: .83rem; font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    display: flex; align-items: center; gap: 8px;
+    transform: translateX(120%); transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+    max-width: 320px;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.success { background: var(--green); }
+  .toast.error { background: var(--red); }
+  .toast svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+  /* Page views */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .stats-grid { grid-template-columns: repeat(2,1fr); }
+    .sidebar { width: 200px; }
+    .main { margin-left: 200px; }
+  }
+  @media (max-width: 640px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .form-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Avatar color palette */
+  .av-0 { background: #dbeafe; color: #1d4ed8; }
+  .av-1 { background: #dcfce7; color: #15803d; }
+  .av-2 { background: #fce7f3; color: #be185d; }
+  .av-3 { background: #fef9c3; color: #a16207; }
+  .av-4 { background: #ede9fe; color: #6d28d9; }
+  .av-5 { background: #ffedd5; color: #c2410c; }
+  .av-6 { background: #ccfbf1; color: #0f766e; }
+  .av-7 { background: #e0f2fe; color: #0369a1; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <h1>Denta<span>Care</span></h1>
+      <p>Appointment Manager</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">Menu</div>
+      <div class="nav-item active" onclick="showPage('dashboard', this)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1.5" stroke-width="2"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" onclick="showPage('appointments', this)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" stroke-width="2"/><path stroke-width="2" d="M16 2v4M8 2v4M3 10h18"/></svg>
+        Appointments
+      </div>
+      <div class="nav-section">Quick Actions</div>
+      <div class="nav-item" onclick="openModal()">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/><path stroke-width="2" d="M12 8v8M8 12h8"/></svg>
+        New Appointment
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <strong>Dr. Sarah Mitchell</strong>
+      Senior Dentist
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <span class="topbar-title" id="page-title">Dashboard</span>
+        <span id="page-date"></span>
+      </div>
+      <button class="btn-primary" onclick="openModal()">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2.5" d="M12 5v14M5 12h14"/></svg>
+        New Appointment
+      </button>
+    </header>
+
+    <div class="content">
+
+      <!-- Dashboard Page -->
+      <div class="page active" id="page-dashboard">
+        <div class="stats-grid" id="stats-grid"></div>
+        <div class="table-card">
+          <div class="table-header">
+            <span class="table-title">Today's Appointments</span>
+            <span class="table-count" id="today-count"></span>
+          </div>
+          <div id="today-table-body"></div>
+        </div>
+      </div>
+
+      <!-- Appointments Page -->
+      <div class="page" id="page-appointments">
+        <div class="filters-bar">
+          <div class="filter-group">
+            <label>Date</label>
+            <input type="date" class="filter-input" id="filter-date" oninput="applyFilters()">
+          </div>
+          <div class="filter-group">
+            <label>Status</label>
+            <select class="filter-select" id="filter-status" onchange="applyFilters()">
+              <option value="">All Statuses</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Treatment</label>
+            <select class="filter-select" id="filter-treatment" onchange="applyFilters()">
+              <option value="">All Treatments</option>
+            </select>
+          </div>
+          <button class="btn-ghost" onclick="clearFilters()">Clear</button>
+        </div>
+        <div class="table-card">
+          <div class="table-header">
+            <span class="table-title">All Appointments</span>
+            <span class="table-count" id="all-count"></span>
+          </div>
+          <div id="all-table-body"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">New Appointment</h2>
+      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Patient Name *</label>
+          <input type="text" class="form-control" id="f-name" placeholder="Full name">
+          <span class="error-msg" id="err-name"></span>
+        </div>
+        <div class="form-group">
+          <label>Date *</label>
+          <input type="date" class="form-control" id="f-date">
+          <span class="error-msg" id="err-date"></span>
+        </div>
+        <div class="form-group">
+          <label>Time *</label>
+          <input type="time" class="form-control" id="f-time">
+          <span class="error-msg" id="err-time"></span>
+        </div>
+        <div class="form-group">
+          <label>Treatment Type *</label>
+          <select class="form-control" id="f-treatment">
+            <option value="">Select treatment</option>
+            <option>Cleaning</option>
+            <option>Filling</option>
+            <option>Root Canal</option>
+            <option>Extraction</option>
+            <option>Whitening</option>
+            <option>Checkup</option>
+            <option>Crown</option>
+            <option>Braces</option>
+          </select>
+          <span class="error-msg" id="err-treatment"></span>
+        </div>
+        <div class="form-group">
+          <label>Dentist *</label>
+          <select class="form-control" id="f-dentist">
+            <option value="">Select dentist</option>
+            <option>Dr. Sarah Mitchell</option>
+            <option>Dr. James Okafor</option>
+            <option>Dr. Lisa Chen</option>
+            <option>Dr. Robert Hayes</option>
+          </select>
+          <span class="error-msg" id="err-dentist"></span>
+        </div>
+        <div class="form-group full">
+          <label>Notes</label>
+          <textarea class="form-control" id="f-notes" placeholder="Any special notes or concerns&#x2026;"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveAppointment()">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+        <span id="modal-save-text">Save Appointment</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Cancel Dialog -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div class="confirm-icon">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+    </div>
+    <h3>Cancel Appointment?</h3>
+    <p>This appointment will be marked as cancelled. This action cannot be undone.</p>
+    <div class="confirm-btns">
+      <button class="btn-secondary" onclick="closeConfirm()">Keep It</button>
+      <button class="btn-danger" onclick="confirmCancel()">Yes, Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+const TODAY = new Date().toISOString().slice(0, 10);
+
+let appointments = [
+  { id:1,  name:"Emma Thompson",   date:"2026-06-04", time:"09:00", treatment:"Cleaning",   dentist:"Dr. Sarah Mitchell", notes:"Regular 6-month cleaning.",                status:"scheduled"  },
+  { id:2,  name:"Carlos Rivera",   date:"2026-06-04", time:"10:30", treatment:"Filling",    dentist:"Dr. James Okafor",   notes:"Lower-left molar, composite resin.",      status:"scheduled"  },
+  { id:3,  name:"Priya Sharma",    date:"2026-06-04", time:"14:00", treatment:"Checkup",    dentist:"Dr. Lisa Chen",      notes:"",                                        status:"completed"  },
+  { id:4,  name:"David Kim",       date:"2026-06-03", time:"11:00", treatment:"Root Canal", dentist:"Dr. Robert Hayes",   notes:"Severe pain reported last visit.",         status:"completed"  },
+  { id:5,  name:"Sofia Andersen",  date:"2026-06-03", time:"15:30", treatment:"Whitening",  dentist:"Dr. Sarah Mitchell", notes:"Patient requested max shade.",             status:"cancelled"  },
+  { id:6,  name:"James O'Brien",   date:"2026-06-05", time:"08:30", treatment:"Crown",      dentist:"Dr. Lisa Chen",      notes:"Temporary crown placed last visit.",       status:"scheduled"  },
+  { id:7,  name:"Aisha Patel",     date:"2026-06-05", time:"13:00", treatment:"Braces",     dentist:"Dr. Robert Hayes",   notes:"Monthly adjustment.",                     status:"scheduled"  },
+  { id:8,  name:"Michael Torres",  date:"2026-06-06", time:"09:30", treatment:"Extraction", dentist:"Dr. James Okafor",   notes:"Wisdom tooth extraction, upper-right.",   status:"scheduled"  },
+  { id:9,  name:"Lily Nguyen",     date:"2026-06-07", time:"11:30", treatment:"Checkup",    dentist:"Dr. Sarah Mitchell", notes:"New patient intake.",                     status:"scheduled"  },
+  { id:10, name:"Ben Kowalski",    date:"2026-05-28", time:"10:00", treatment:"Cleaning",   dentist:"Dr. Lisa Chen",      notes:"Sensitive gums noted.",                   status:"completed"  },
+];
+let nextId = 11;
+let editId = null;
+let cancelTargetId = null;
+
+// ── Utilities ──────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const fmtDate = s => {
+  if (!s) return '—';
+  const [y,m,d] = s.split('-');
+  return new Date(+y,+m-1,+d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+};
+const fmtTime = t => {
+  const [h,min] = t.split(':');
+  const hr = +h; const ampm = hr>=12?'PM':'AM';
+  return `${hr%12||12}:${min} ${ampm}`;
+};
+const initials = name => name.split(' ').slice(0,2).map(p=>p[0]).join('').toUpperCase();
+const avClass  = name => 'av-' + (name.charCodeAt(0) % 8);
+
+function showToast(msg, type='success') {
+  const tc = $('toast-container');
+  const icons = {
+    success: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>',
+    error:   '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>',
+  };
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = (icons[type]||'') + msg;
+  tc.appendChild(el);
+  requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => { if (tc.contains(el)) tc.removeChild(el); }, 400);
+  }, 3200);
+}
+
+// ── Navigation ─────────────────────────────────────────
+function showPage(name, navEl) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  $(`page-${name}`).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (navEl) navEl.classList.add('active');
+  $('page-title').textContent = name === 'dashboard' ? 'Dashboard' : 'Appointments';
+  if (name === 'appointments') renderAppointments();
+  if (name === 'dashboard') renderDashboard();
+}
+
+// ── Render helpers ─────────────────────────────────────
+function renderBadge(status) {
+  return `<span class="badge ${status}">${status}</span>`;
+}
+
+function renderRow(appt) {
+  const isScheduled = appt.status === 'scheduled';
+  const disabledAttr = isScheduled ? '' : 'disabled style="opacity:.38;cursor:not-allowed"';
+  return `<tr>
+    <td>
+      <div class="patient-cell">
+        <div class="avatar ${avClass(appt.name)}">${initials(appt.name)}</div>
+        <div><div class="patient-name">${appt.name}</div><div class="patient-id">#PT-${String(appt.id).padStart(4,'0')}</div></div>
+      </div>
+    </td>
+    <td>${fmtDate(appt.date)}</td>
+    <td>${fmtTime(appt.time)}</td>
+    <td><span class="treatment-chip">${appt.treatment}</span></td>
+    <td>${appt.dentist}</td>
+    <td>${renderBadge(appt.status)}</td>
+    <td>
+      <div class="actions">
+        <button class="btn-icon edit" title="Edit" onclick="editAppointment(${appt.id})" ${disabledAttr}>
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+        </button>
+        <button class="btn-icon cancel" title="Cancel appointment" onclick="askCancel(${appt.id})" ${disabledAttr}>
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function renderTable(rows, containerId) {
+  const cont = $(containerId);
+  if (!rows.length) {
+    cont.innerHTML = `<div class="empty-state">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" stroke-width="1.5"/><path stroke-width="1.5" d="M16 2v4M8 2v4M3 10h18"/></svg>
+      <p>No appointments found.</p>
+    </div>`;
+    return;
+  }
+  cont.innerHTML = `<table>
+    <thead><tr>
+      <th>Patient</th><th>Date</th><th>Time</th><th>Treatment</th><th>Dentist</th><th>Status</th><th>Actions</th>
+    </tr></thead>
+    <tbody>${rows.map(renderRow).join('')}</tbody>
+  </table>`;
+}
+
+// ── Dashboard ──────────────────────────────────────────
+function renderDashboard() {
+  const todayAppts = appointments.filter(a => a.date === TODAY);
+  const scheduled  = appointments.filter(a => a.status === 'scheduled');
+  const completed  = appointments.filter(a => a.status === 'completed');
+  const total      = new Set(appointments.map(a => a.name)).size;
+
+  $('stats-grid').innerHTML = `
+    ${statCard("Today's Appointments", todayAppts.length, 'Scheduled for today', 'blue',
+      '<path stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>')}
+    ${statCard('Total Patients', total, 'Unique patients', 'teal',
+      '<path stroke-width="2" d="M17 20h5v-2a4 4 0 00-5-3.56M9 20H4v-2a4 4 0 015-3.56M15 7a4 4 0 11-8 0 4 4 0 018 0z"/>')}
+    ${statCard('Upcoming', scheduled.length, 'Scheduled appointments', 'amber',
+      '<circle cx="12" cy="12" r="9" stroke-width="2"/><path stroke-width="2" d="M12 7v5l3 3"/>')}
+    ${statCard('Completed', completed.length, 'Finished appointments', 'green',
+      '<path stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>')}
+  `;
+
+  $('today-count').textContent = `${todayAppts.length} appointment${todayAppts.length !== 1 ? 's' : ''}`;
+  renderTable(todayAppts, 'today-table-body');
+  $('page-date').textContent = fmtDate(TODAY);
+}
+
+function statCard(label, value, sub, color, iconPath) {
+  return `<div class="stat-card">
+    <div class="stat-card-header">
+      <span class="stat-label">${label}</span>
+      <div class="stat-icon ${color}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">${iconPath}</svg>
+      </div>
+    </div>
+    <div class="stat-value">${value}</div>
+    <div class="stat-sub">${sub}</div>
+  </div>`;
+}
+
+// ── Appointments Page ──────────────────────────────────
+function populateTreatmentFilter() {
+  const sel = $('filter-treatment');
+  const existing = Array.from(sel.options).map(o => o.value);
+  ['Cleaning','Filling','Root Canal','Extraction','Whitening','Checkup','Crown','Braces'].forEach(t => {
+    if (!existing.includes(t)) {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = t;
+      sel.appendChild(opt);
+    }
+  });
+}
+
+function applyFilters() {
+  const date = $('filter-date').value;
+  const status = $('filter-status').value;
+  const treatment = $('filter-treatment').value;
+  const filtered = appointments.filter(a =>
+    (!date      || a.date === date) &&
+    (!status    || a.status === status) &&
+    (!treatment || a.treatment === treatment)
+  );
+  $('all-count').textContent = `${filtered.length} result${filtered.length !== 1 ? 's' : ''}`;
+  renderTable(filtered, 'all-table-body');
+}
+
+function clearFilters() {
+  $('filter-date').value = '';
+  $('filter-status').value = '';
+  $('filter-treatment').value = '';
+  applyFilters();
+}
+
+function renderAppointments() {
+  populateTreatmentFilter();
+  applyFilters();
+}
+
+// ── Modal ──────────────────────────────────────────────
+function openModal(id) {
+  editId = id || null;
+  clearFormErrors();
+  if (editId) {
+    const a = appointments.find(x => x.id === editId);
+    $('modal-title').textContent = 'Edit Appointment';
+    $('modal-save-text').textContent = 'Update Appointment';
+    $('f-name').value = a.name;
+    $('f-date').value = a.date;
+    $('f-time').value = a.time;
+    $('f-treatment').value = a.treatment;
+    $('f-dentist').value = a.dentist;
+    $('f-notes').value = a.notes;
+  } else {
+    $('modal-title').textContent = 'New Appointment';
+    $('modal-save-text').textContent = 'Save Appointment';
+    $('f-name').value = '';
+    $('f-date').value = TODAY;
+    $('f-time').value = '09:00';
+    $('f-treatment').value = '';
+    $('f-dentist').value = '';
+    $('f-notes').value = '';
+  }
+  $('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  $('modal-overlay').classList.remove('open');
+  editId = null;
+}
+
+function handleOverlayClick(e) {
+  if (e.target === $('modal-overlay')) closeModal();
+}
+
+function clearFormErrors() {
+  ['name','date','time','treatment','dentist'].forEach(f => {
+    $(`f-${f}`).classList.remove('error');
+    $(`err-${f}`).textContent = '';
+  });
+}
+
+function validate() {
+  let ok = true;
+  const required = {name:'Patient name',date:'Date',time:'Time',treatment:'Treatment type',dentist:'Dentist'};
+  Object.entries(required).forEach(([f, label]) => {
+    const val = $(`f-${f}`).value.trim();
+    if (!val) {
+      $(`f-${f}`).classList.add('error');
+      $(`err-${f}`).textContent = `${label} is required.`;
+      ok = false;
+    } else {
+      $(`f-${f}`).classList.remove('error');
+      $(`err-${f}`).textContent = '';
+    }
+  });
+  return ok;
+}
+
+function saveAppointment() {
+  if (!validate()) return;
+  const data = {
+    name: $('f-name').value.trim(),
+    date: $('f-date').value,
+    time: $('f-time').value,
+    treatment: $('f-treatment').value,
+    dentist: $('f-dentist').value,
+    notes: $('f-notes').value.trim(),
+  };
+  if (editId) {
+    const idx = appointments.findIndex(a => a.id === editId);
+    appointments[idx] = { ...appointments[idx], ...data };
+    showToast('Appointment updated successfully.');
+  } else {
+    appointments.push({ id: nextId++, status: 'scheduled', ...data });
+    showToast('Appointment booked successfully.');
+  }
+  closeModal();
+  renderDashboard();
+  if ($('page-appointments').classList.contains('active')) renderAppointments();
+}
+
+// ── Edit and Cancel ────────────────────────────────────
+function editAppointment(id) { openModal(id); }
+
+function askCancel(id) {
+  cancelTargetId = id;
+  $('confirm-overlay').classList.add('open');
+}
+
+function closeConfirm() {
+  $('confirm-overlay').classList.remove('open');
+  cancelTargetId = null;
+}
+
+function confirmCancel() {
+  if (!cancelTargetId) return;
+  const idx = appointments.findIndex(a => a.id === cancelTargetId);
+  appointments[idx].status = 'cancelled';
+  closeConfirm();
+  showToast('Appointment cancelled.', 'error');
+  renderDashboard();
+  if ($('page-appointments').classList.contains('active')) renderAppointments();
+}
+
+// ── Init ───────────────────────────────────────────────
+renderDashboard();
+</script>
+</body>
+</html>
