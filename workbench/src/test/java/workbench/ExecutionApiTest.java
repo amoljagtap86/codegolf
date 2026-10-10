@@ -27,7 +27,9 @@ class ExecutionApiTest {
 
     @AfterEach
     void tearDown() {
-        server.shutdownNow();
+        if (server != null) { // null when setUp failed, e.g. database unreachable
+            server.shutdownNow();
+        }
     }
 
     @Test
