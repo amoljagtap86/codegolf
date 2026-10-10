@@ -12,7 +12,7 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import java.sql.SQLException;
 
-@Path("/api/executions")
+@Path("/executions") // mounted under /api, see Main
 @Produces(MediaType.APPLICATION_JSON)
 public class ExecutionResource {
 

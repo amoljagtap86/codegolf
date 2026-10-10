@@ -63,7 +63,7 @@ export DATABASE_URL='postgresql://workbench:workbench@localhost:5432/workbench'
 mvn exec:java
 ```
 
-Then:
+Then open http://localhost:8080/ for the web UI (currently a hello-world page), or use the API:
 
 ```bash
 curl -i -X POST http://localhost:8080/api/executions   # start and run an execution
@@ -74,6 +74,7 @@ curl http://localhost:8080/api/executions/1            # inspect it
 
 | Method | Path                   | Description |
 |--------|------------------------|-------------|
+| GET    | `/`                    | Web UI (static files from `src/main/resources/static`). |
 | POST   | `/api/executions`      | Create an execution and run all steps synchronously. Returns `201` with the execution. |
 | GET    | `/api/executions/{id}` | The execution and all its step attempts. `404` if unknown. |
 

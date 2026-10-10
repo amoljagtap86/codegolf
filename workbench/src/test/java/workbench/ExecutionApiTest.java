@@ -53,6 +53,24 @@ class ExecutionApiTest {
         assertEquals(404, response.statusCode());
     }
 
+    @Test
+    void rootServesHomePage() throws Exception {
+        // Twice: Grizzly's built-in static handler dropped Content-Type on repeat requests.
+        for (int i = 0; i < 2; i++) {
+            HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/")).GET().build());
+            assertEquals(200, response.statusCode());
+            assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("text/html"),
+                    response.headers().map().toString());
+            assertTrue(response.body().contains("Hello, world"), response.body());
+        }
+    }
+
+    @Test
+    void missingStaticFileReturns404() throws Exception {
+        HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/nope.html")).GET().build());
+        assertEquals(404, response.statusCode());
+    }
+
     private HttpResponse<String> send(HttpRequest request) throws Exception {
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
