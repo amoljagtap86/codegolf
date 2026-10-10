@@ -11,7 +11,7 @@ Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, Post
 
 - [x] Milestone 1: run all five steps (happy path), persist the execution and its attempts, JSON API
 - [x] Milestone 2: failure injection and error capture
-- [ ] Milestone 3: retry from the failed step (including repeated and concurrent retry requests)
+- [x] Milestone 3: retry from the failed step (including repeated and concurrent retry requests)
 - [ ] Milestone 4: execution history and web UI
 
 ## Prerequisites
@@ -72,6 +72,9 @@ curl http://localhost:8080/api/executions/1            # inspect it
 # simulate a failure: step 3 fails on its first attempt
 curl -i -X POST http://localhost:8080/api/executions \
      -H 'Content-Type: application/json' -d '{"failStep": 3, "failTimes": 1}'
+
+# retry it from the failed step (use the id returned above)
+curl -i -X POST http://localhost:8080/api/executions/2/retry
 ```
 
 ## API
@@ -81,6 +84,7 @@ curl -i -X POST http://localhost:8080/api/executions \
 | GET    | `/`                    | Web UI (static files from `src/main/resources/static`). |
 | POST   | `/api/executions`      | Create an execution and run its steps synchronously. Returns `201` with the execution, also when the process failed (`status: FAILED`). Optional JSON body, see below. |
 | GET    | `/api/executions/{id}` | The execution and all its step attempts. `404` if unknown. |
+| POST   | `/api/executions/{id}/retry` | Retry a `FAILED` execution from its failed step. `200` with the execution after the retry ran (it may be `FAILED` again). `409` if the execution is not `FAILED`, including when a concurrent retry got there first. `404` if unknown. |
 
 ### Simulating failures
 
@@ -91,11 +95,21 @@ curl -i -X POST http://localhost:8080/api/executions \
 ```
 
 - `failStep` (1–5): the step that fails.
-- `failTimes` (≥ 1, default 1): how many attempts of that step fail before it succeeds (matters once retry exists).
+- `failTimes` (≥ 1, default 1): how many attempts of that step fail before it succeeds. The plan is
+  stored with the execution, so retries replay it: with `failTimes: 2` the first retry fails again.
 - No body: happy path. Invalid plan or malformed JSON: `400`, nothing is created.
 
 When a step fails, its attempt is marked `FAILED` with `errorMessage` and `errorDetail` (stack trace),
 the execution is marked `FAILED`, and later steps are not attempted (they have no attempt rows).
+
+### Retry semantics
+
+- A retry resumes at the first step without a successful attempt. Earlier steps are never rerun.
+- Each retry adds new attempt rows (`attempt_no` 2, 3, ...); earlier attempts are kept as history.
+- Only one retry can run at a time: the retry first claims the execution with a single atomic
+  `UPDATE ... SET status = 'RUNNING' WHERE status = 'FAILED'`. Concurrent or repeated requests
+  that lose the claim get `409` and change nothing. The `UNIQUE (execution_id, step_index, attempt_no)`
+  constraint is a second line of defence.
 
 ## Data model
 
@@ -106,7 +120,7 @@ the execution is marked `FAILED`, and later steps are not attempted (they have n
 ## Known limitations
 
 - An execution whose process crashes mid-run (e.g. the JVM dies or the database goes away) stays
-  `RUNNING`; there is no recovery yet.
+  `RUNNING`; it cannot be retried (`409`) and there is no recovery yet.
 - Requests with an `Upgrade: h2c` header (Java's `HttpClient` with default settings, `curl --http2`)
   and a body hang for 30 s and fail with `500`: Grizzly withholds the body of upgrade requests.
   Browsers and plain `curl` are not affected. Use HTTP/1.1 in Java clients.

@@ -22,29 +22,48 @@ public class Runner {
     }
 
     /**
-     * Creates an execution and runs its steps synchronously until one fails or all succeed.
-     * A step failure is recorded on its attempt and fails the execution; later steps are not
-     * attempted. Database errors are not caught. Returns the execution id.
+     * Creates an execution and runs it synchronously. Returns the execution id.
      *
      * @param plan simulated failure, or null for the happy path
      */
     public long start(FailurePlan plan) throws SQLException {
         long executionId = db.insertRunningExecution(plan);
-        for (int i = 0; i < STEPS.size(); i++) {
-            int stepIndex = i + 1;
-            int attemptNo = 1;
-            long attemptId = db.insertRunningAttempt(executionId, stepIndex, STEPS.get(i), attemptNo);
+        runFrom(executionId, 1, plan);
+        return executionId;
+    }
+
+    /**
+     * Retries a FAILED execution synchronously, resuming at its first step without a successful
+     * attempt; earlier steps are not rerun. Returns false, changing nothing, if the execution is
+     * unknown or not FAILED, including when a concurrent retry claimed it first.
+     */
+    public boolean retry(long executionId) throws SQLException {
+        if (!db.claimForRetry(executionId)) {
+            return false;
+        }
+        FailurePlan plan = db.findExecution(executionId).orElseThrow().failurePlan();
+        runFrom(executionId, db.firstUnfinishedStep(executionId, STEPS.size()), plan);
+        return true;
+    }
+
+    /**
+     * Runs steps from fromStep until one fails or all succeed. A step failure is recorded on its
+     * attempt and fails the execution; later steps are not attempted. Database errors are not caught.
+     */
+    private void runFrom(long executionId, int fromStep, FailurePlan plan) throws SQLException {
+        for (int stepIndex = fromStep; stepIndex <= STEPS.size(); stepIndex++) {
+            int attemptNo = db.nextAttemptNo(executionId, stepIndex);
+            long attemptId = db.insertRunningAttempt(executionId, stepIndex, STEPS.get(stepIndex - 1), attemptNo);
             try {
                 runStep(stepIndex, attemptNo, plan);
             } catch (RuntimeException e) {
                 db.failAttempt(attemptId, e.getMessage(), stackTrace(e));
                 db.finishExecution(executionId, "FAILED");
-                return executionId;
+                return;
             }
             db.finishAttempt(attemptId, "SUCCEEDED");
         }
         db.finishExecution(executionId, "SUCCEEDED");
-        return executionId;
     }
 
     /** The simulated work of one step: does nothing unless the plan says this attempt fails. */

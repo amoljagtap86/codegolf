@@ -70,6 +70,26 @@ class ExecutionApiTest {
     }
 
     @Test
+    void retryOfFailedExecutionReturns200AndRetryOfSucceededReturns409() throws Exception {
+        assertEquals(201, postJson("{\"failStep\": 4}").statusCode());
+
+        HttpResponse<String> retried = post("/api/executions/1/retry");
+        assertEquals(200, retried.statusCode(), retried.body());
+        assertTrue(retried.body().contains("\"status\":\"SUCCEEDED\""), retried.body());
+
+        HttpResponse<String> again = post("/api/executions/1/retry");
+        assertEquals(409, again.statusCode());
+        assertTrue(again.headers().firstValue("Content-Type").orElse("").startsWith("application/json"));
+        assertTrue(again.body().contains("Execution 1 is SUCCEEDED; only FAILED executions can be retried"),
+                again.body());
+    }
+
+    @Test
+    void retryOfUnknownExecutionReturns404() throws Exception {
+        assertEquals(404, post("/api/executions/999/retry").statusCode());
+    }
+
+    @Test
     void getUnknownExecutionReturns404() throws Exception {
         HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/api/executions/999"))
                 .GET().build());
@@ -92,6 +112,11 @@ class ExecutionApiTest {
     void missingStaticFileReturns404() throws Exception {
         HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/nope.html")).GET().build());
         assertEquals(404, response.statusCode());
+    }
+
+    private HttpResponse<String> post(String path) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + path))
+                .POST(HttpRequest.BodyPublishers.noBody()).build());
     }
 
     private HttpResponse<String> postJson(String json) throws Exception {

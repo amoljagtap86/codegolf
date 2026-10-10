@@ -85,6 +85,45 @@ public class Db {
         }
     }
 
+    /**
+     * Atomically moves a FAILED execution back to RUNNING. Of any number of concurrent callers,
+     * at most one gets true: Postgres locks the row, and the others then see status = 'RUNNING'.
+     */
+    public boolean claimForRetry(long executionId) throws SQLException {
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement("""
+                     UPDATE executions SET status = 'RUNNING', finished_at = NULL
+                     WHERE id = ? AND status = 'FAILED'""")) {
+            ps.setLong(1, executionId);
+            return ps.executeUpdate() == 1;
+        }
+    }
+
+    /** The first step (1-based) without a SUCCEEDED attempt; stepCount + 1 if all succeeded. */
+    public int firstUnfinishedStep(long executionId, int stepCount) throws SQLException {
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement("""
+                     SELECT coalesce(min(s), ? + 1) FROM generate_series(1, ?) AS s
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM step_attempts a
+                         WHERE a.execution_id = ? AND a.step_index = s AND a.status = 'SUCCEEDED')""")) {
+            ps.setInt(1, stepCount);
+            ps.setInt(2, stepCount);
+            ps.setLong(3, executionId);
+            return (int) singleLong(ps);
+        }
+    }
+
+    public int nextAttemptNo(long executionId, int stepIndex) throws SQLException {
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT coalesce(max(attempt_no), 0) + 1 FROM step_attempts WHERE execution_id = ? AND step_index = ?")) {
+            ps.setLong(1, executionId);
+            ps.setInt(2, stepIndex);
+            return (int) singleLong(ps);
+        }
+    }
+
     public long insertRunningAttempt(long executionId, int stepIndex, String stepName, int attemptNo)
             throws SQLException {
         try (Connection c = connect();
