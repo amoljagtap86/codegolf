@@ -195,12 +195,10 @@ public class Db {
                     if (!rs.next()) {
                         return Optional.empty();
                     }
-                    int failStep = rs.getInt("fail_step");
-                    FailurePlan plan = rs.wasNull() ? null : new FailurePlan(failStep, rs.getInt("fail_times"));
                     return Optional.of(new Execution(
                             rs.getLong("id"),
                             rs.getString("status"),
-                            plan,
+                            failurePlan(rs),
                             rs.getObject("created_at", OffsetDateTime.class),
                             rs.getObject("started_at", OffsetDateTime.class),
                             rs.getObject("finished_at", OffsetDateTime.class),
@@ -208,6 +206,44 @@ public class Db {
                 }
             }
         }
+    }
+
+    /** Newest first, with attempt and retry counts aggregated in the same query. */
+    public List<ExecutionSummary> listExecutions(int limit) throws SQLException {
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement("""
+                     SELECT e.id, e.status, e.created_at, e.finished_at,
+                            (e.failure_plan ->> 'failStep')::int AS fail_step,
+                            (e.failure_plan ->> 'failTimes')::int AS fail_times,
+                            count(a.id) AS attempt_count,
+                            count(a.id) - count(DISTINCT a.step_index) AS retry_count
+                     FROM executions e
+                     LEFT JOIN step_attempts a ON a.execution_id = e.id
+                     GROUP BY e.id
+                     ORDER BY e.id DESC
+                     LIMIT ?""")) {
+            ps.setInt(1, limit);
+            List<ExecutionSummary> summaries = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    summaries.add(new ExecutionSummary(
+                            rs.getLong("id"),
+                            rs.getString("status"),
+                            failurePlan(rs),
+                            rs.getObject("created_at", OffsetDateTime.class),
+                            rs.getObject("finished_at", OffsetDateTime.class),
+                            rs.getInt("attempt_count"),
+                            rs.getInt("retry_count")));
+                }
+            }
+            return summaries;
+        }
+    }
+
+    /** Reads the fail_step / fail_times columns selected from executions.failure_plan; null if none. */
+    private static FailurePlan failurePlan(ResultSet rs) throws SQLException {
+        int failStep = rs.getInt("fail_step");
+        return rs.wasNull() ? null : new FailurePlan(failStep, rs.getInt("fail_times"));
     }
 
     private static long singleLong(PreparedStatement ps) throws SQLException {

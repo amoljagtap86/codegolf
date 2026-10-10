@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.Map;
 import org.glassfish.grizzly.http.server.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,21 +98,69 @@ class ExecutionApiTest {
     }
 
     @Test
-    void rootServesHomePage() throws Exception {
-        // Twice: Grizzly's built-in static handler dropped Content-Type on repeat requests.
-        for (int i = 0; i < 2; i++) {
-            HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/")).GET().build());
-            assertEquals(200, response.statusCode());
-            assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("text/html"),
-                    response.headers().map().toString());
-            assertTrue(response.body().contains("Hello, world"), response.body());
+    void staticFilesAreServedWithCorrectContentType() throws Exception {
+        // Browsers refuse scripts and stylesheets served with the wrong type. Each is fetched twice:
+        // Grizzly's built-in static handler dropped Content-Type on repeat requests.
+        Map<String, String> expected = Map.of(
+                "/", "text/html",
+                "/execution.html", "text/html",
+                "/app.js", "text/javascript",
+                "/style.css", "text/css");
+        for (Map.Entry<String, String> file : expected.entrySet()) {
+            for (int i = 0; i < 2; i++) {
+                HttpResponse<String> response = get(file.getKey());
+                assertEquals(200, response.statusCode(), file.getKey());
+                assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith(file.getValue()),
+                        file.getKey() + " " + response.headers().map());
+            }
         }
+        assertTrue(get("/").body().contains("Execution history"));
+    }
+
+    @Test
+    void listReturnsNewestFirstWithAttemptAndRetryCounts() throws Exception {
+        assertEquals(201, post("/api/executions").statusCode());               // 1: 5 attempts, 0 retries
+        assertEquals(201, postJson("{\"failStep\": 2, \"failTimes\": 2}").statusCode()); // 2: FAILED
+        assertEquals(200, post("/api/executions/2/retry").statusCode());       // 2: FAILED again
+        assertEquals(200, post("/api/executions/2/retry").statusCode());       // 2: SUCCEEDED
+
+        HttpResponse<String> response = get("/api/executions");
+        assertEquals(200, response.statusCode());
+        String body = response.body();
+        assertTrue(body.indexOf("\"id\":2") < body.indexOf("\"id\":1"), "newest first: " + body);
+        // Execution 2: step 1 once, step 2 three times, steps 3-5 once = 7 attempts, 2 retries.
+        assertTrue(body.contains("\"id\":2,\"status\":\"SUCCEEDED\",\"failurePlan\":{\"failStep\":2,\"failTimes\":2}"), body);
+        assertTrue(body.contains("\"attemptCount\":7,\"retryCount\":2"), body);
+        assertTrue(body.contains("\"attemptCount\":5,\"retryCount\":0"), body);
+        assertTrue(body.contains("\"failurePlan\":null"), body);
+    }
+
+    @Test
+    void listHonoursAndValidatesLimit() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            post("/api/executions");
+        }
+        String body = get("/api/executions?limit=2").body();
+        assertTrue(body.contains("\"id\":3") && body.contains("\"id\":2") && !body.contains("\"id\":1"), body);
+
+        assertEquals(400, get("/api/executions?limit=0").statusCode());
+        assertEquals(400, get("/api/executions?limit=201").statusCode());
+    }
+
+    @Test
+    void stepsReturnsProcessDefinition() throws Exception {
+        assertEquals("[\"VALIDATE_ORDER\",\"RESERVE_INVENTORY\",\"CHARGE_PAYMENT\",\"CREATE_SHIPMENT\",\"SEND_CONFIRMATION\"]",
+                get("/api/executions/steps").body());
     }
 
     @Test
     void missingStaticFileReturns404() throws Exception {
         HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/nope.html")).GET().build());
         assertEquals(404, response.statusCode());
+    }
+
+    private HttpResponse<String> get(String path) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + path)).GET().build());
     }
 
     private HttpResponse<String> post(String path) throws Exception {

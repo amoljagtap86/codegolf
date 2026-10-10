@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Execution · Orchestration Workbench</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js"></script>
+</head>
+<body>
+    <p><a href="./">← Execution history</a></p>
+    <div id="content"><p class="muted">Loading…</p></div>
+
+    <script>
+        const id = new URLSearchParams(location.search).get("id");
+        let steps = [];
+
+        /** A step's status is derived from its latest attempt; no attempts means PENDING. */
+        function stepView(execution, index) {
+            const attempts = execution.attempts.filter(a => a.stepIndex === index);
+            const status = attempts.length ? attempts[attempts.length - 1].status : "PENDING";
+            return {attempts, status};
+        }
+
+        function attemptRow(a) {
+            return el("tr", {},
+                el("td", {}, `Attempt ${a.attemptNo}`),
+                el("td", {}, badge(a.status)),
+                el("td", {}, formatTime(a.startedAt)),
+                el("td", {class: "num"}, formatDuration(a.startedAt, a.finishedAt)),
+                el("td", {},
+                    a.errorMessage ? el("div", {class: "error"}, a.errorMessage) : null,
+                    a.errorDetail ? el("details", {}, el("summary", {}, "Stack trace"), el("pre", {}, a.errorDetail)) : null));
+        }
+
+        function render(execution) {
+            document.title = `Execution #${execution.id} · Orchestration Workbench`;
+            const retryButton = execution.status === "FAILED"
+                ? el("button", {id: "retry", type: "button", class: "primary"}, "Retry from failed step")
+                : null;
+
+            const timeline = steps.map((name, i) => {
+                const view = stepView(execution, i + 1);
+                return el("li", {class: view.status === "PENDING" ? "pending" : null},
+                    el("div", {class: "step-title"}, `${i + 1}. ${name}`, badge(view.status),
+                        view.attempts.length > 1 ? el("span", {class: "muted"}, `${view.attempts.length} attempts`) : null),
+                    view.attempts.length
+                        ? el("div", {class: "table-wrap"}, el("table", {class: "attempts"}, el("tbody", {}, ...view.attempts.map(attemptRow))))
+                        : el("div", {class: "muted"}, "Not attempted"));
+            });
+
+            document.getElementById("content").replaceChildren(...[
+                el("h1", {}, `Execution #${execution.id} `, badge(execution.status)),
+                el("div", {class: "header panel"},
+                    el("div", {}, el("span", {}, "Failure plan"), formatPlan(execution.failurePlan)),
+                    el("div", {}, el("span", {}, "Started"), formatTime(execution.startedAt)),
+                    el("div", {}, el("span", {}, "Finished"), formatTime(execution.finishedAt)),
+                    el("div", {}, el("span", {}, "Duration"), formatDuration(execution.startedAt, execution.finishedAt))),
+                el("div", {id: "message"}),
+                retryButton,
+                el("h2", {}, "Timeline"),
+                el("ol", {class: "timeline"}, ...timeline),
+            ].filter(Boolean)); // replaceChildren() would render a null retryButton as the text "null"
+
+            if (retryButton) {
+                retryButton.addEventListener("click", retry);
+            }
+        }
+
+        async function retry(event) {
+            event.target.disabled = true; // blocks double clicks; the server's 409 guarantees correctness
+            try {
+                render(await api(`/api/executions/${id}/retry`, {method: "POST"}));
+            } catch (e) {
+                if (e.status === 409) { // someone else retried first: show why, then the current state
+                    render(await api(`/api/executions/${id}`));
+                }
+                document.getElementById("message").replaceChildren(el("p", {class: "error"}, `Retry rejected: ${e.message}`));
+                event.target.disabled = false;
+            }
+        }
+
+        async function load() {
+            if (!id) {
+                showError("content", "No execution id in the URL.");
+                return;
+            }
+            try {
+                steps = await api("/api/executions/steps");
+                render(await api(`/api/executions/${encodeURIComponent(id)}`));
+            } catch (e) {
+                showError("content", e.status === 404 ? `Execution ${id} not found.` : `Could not load execution: ${e.message}`);
+            }
+        }
+
+        load();
+    </script>
+</body>
+</html>

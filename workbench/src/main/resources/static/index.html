@@ -4,9 +4,91 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Orchestration Workbench</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js"></script>
 </head>
 <body>
-    <h1>Hello, world</h1>
-    <p>Orchestration Workbench is running.</p>
+    <h1>Orchestration Workbench</h1>
+    <p class="muted">A simulated five-step business process with failure injection and retry.</p>
+
+    <h2>Start an execution</h2>
+    <form id="start-form" class="panel">
+        <label>Failing step
+            <select id="fail-step">
+                <option value="">none (happy path)</option>
+            </select>
+        </label>
+        <label>Fails how many times
+            <input id="fail-times" type="number" min="1" value="1" disabled>
+        </label>
+        <button type="submit" class="primary">Start</button>
+        <span id="start-error" class="error"></span>
+    </form>
+
+    <h2>Execution history <button id="refresh" type="button">Refresh</button></h2>
+    <div id="history" class="table-wrap"><p class="muted">Loading…</p></div>
+
+    <script>
+        const failStep = document.getElementById("fail-step");
+        const failTimes = document.getElementById("fail-times");
+
+        async function loadSteps() {
+            const steps = await api("/api/executions/steps");
+            steps.forEach((name, i) => failStep.append(el("option", {value: i + 1}, `${i + 1}. ${name}`)));
+        }
+
+        async function loadHistory() {
+            try {
+                const executions = await api("/api/executions");
+                if (executions.length === 0) {
+                    document.getElementById("history").replaceChildren(
+                        el("p", {class: "muted"}, "No executions yet. Start one above."));
+                    return;
+                }
+                const rows = executions.map(e => el("tr", {},
+                    el("td", {}, el("a", {href: `execution.html?id=${e.id}`}, `#${e.id}`)),
+                    el("td", {}, badge(e.status)),
+                    el("td", {}, formatPlan(e.failurePlan)),
+                    el("td", {}, formatTime(e.createdAt)),
+                    el("td", {}, formatTime(e.finishedAt)),
+                    el("td", {class: "num"}, String(e.attemptCount)),
+                    el("td", {class: "num"}, String(e.retryCount))));
+                document.getElementById("history").replaceChildren(el("table", {},
+                    el("thead", {}, el("tr", {},
+                        el("th", {}, "Execution"), el("th", {}, "Status"), el("th", {}, "Failure plan"),
+                        el("th", {}, "Created"), el("th", {}, "Finished"),
+                        el("th", {class: "num"}, "Attempts"), el("th", {class: "num"}, "Retries"))),
+                    el("tbody", {}, ...rows)));
+            } catch (e) {
+                showError("history", `Could not load executions: ${e.message}`);
+            }
+        }
+
+        failStep.addEventListener("change", () => failTimes.disabled = failStep.value === "");
+
+        document.getElementById("start-form").addEventListener("submit", async event => {
+            event.preventDefault();
+            const button = event.submitter;
+            button.disabled = true;
+            document.getElementById("start-error").textContent = "";
+            try {
+                const options = {method: "POST"};
+                if (failStep.value !== "") {
+                    options.headers = {"Content-Type": "application/json"};
+                    options.body = JSON.stringify({failStep: Number(failStep.value), failTimes: Number(failTimes.value)});
+                }
+                const execution = await api("/api/executions", options);
+                location.href = `execution.html?id=${execution.id}`;
+            } catch (e) {
+                document.getElementById("start-error").textContent = e.message;
+                button.disabled = false;
+            }
+        });
+
+        document.getElementById("refresh").addEventListener("click", loadHistory);
+
+        loadSteps().catch(e => document.getElementById("start-error").textContent = `Could not load steps: ${e.message}`);
+        loadHistory();
+    </script>
 </body>
 </html>

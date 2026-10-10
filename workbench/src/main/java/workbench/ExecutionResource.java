@@ -1,17 +1,20 @@
 package workbench;
 
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
 
 @Path("/executions") // mounted under /api, see Main
@@ -35,19 +38,40 @@ public class ExecutionResource {
                 .build();
     }
 
+    /** Execution history, newest first. */
+    @GET
+    public List<ExecutionSummary> list(@QueryParam("limit") @DefaultValue("50") int limit) throws SQLException {
+        if (limit < 1 || limit > 200) {
+            throw error(Response.Status.BAD_REQUEST, "limit must be between 1 and 200");
+        }
+        return db.listExecutions(limit);
+    }
+
     /** Retries a FAILED execution from its failed step. 409 if not FAILED (incl. a concurrent retry won). */
     @POST
     @Path("{id}/retry")
     public Execution retry(@PathParam("id") long id) throws SQLException {
         if (!runner.retry(id)) {
             Execution execution = get(id); // 404 if unknown
-            throw new WebApplicationException(Response.status(Response.Status.CONFLICT)
-                    .type(MediaType.APPLICATION_JSON)
-                    .entity(Map.of("error", "Execution " + id + " is " + execution.status()
-                            + "; only FAILED executions can be retried"))
-                    .build());
+            throw error(Response.Status.CONFLICT,
+                    "Execution " + id + " is " + execution.status() + "; only FAILED executions can be retried");
         }
         return get(id);
+    }
+
+    /** The process definition, so the UI shows names for steps not attempted yet. */
+    @GET
+    @Path("steps")
+    public List<String> steps() {
+        return Runner.STEPS;
+    }
+
+    /** Error response with a JSON body {"error": message}. */
+    private static WebApplicationException error(Response.Status status, String message) {
+        return new WebApplicationException(Response.status(status)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(Map.of("error", message))
+                .build());
     }
 
     @GET
