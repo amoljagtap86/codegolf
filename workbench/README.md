@@ -60,7 +60,7 @@ mvn test
 ```bash
 cd workbench
 export DATABASE_URL='postgresql://workbench:workbench@localhost:5432/workbench'
-mvn exec:java
+mvn compile exec:java   # exec:java alone does not recompile
 ```
 
 Then open http://localhost:8080/ for the web UI (currently a hello-world page), or use the API:
