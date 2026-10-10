@@ -3,22 +3,27 @@ package workbench;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.sql.SQLException;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+import workbench.ProcessDefinition.StepDef;
 
-/** Runs the simulated business process: five sequential steps. */
+/**
+ * Runs a process DAG, one step at a time (milestone 5a). A step is ready when all its dependencies
+ * have succeeded and it has not; the runner keeps running a ready step until none is left.
+ */
 public class Runner {
 
-    public static final List<String> STEPS = List.of(
-            "VALIDATE_ORDER",
-            "RESERVE_INVENTORY",
-            "CHARGE_PAYMENT",
-            "CREATE_SHIPMENT",
-            "SEND_CONFIRMATION");
-
     private final Db db;
+    private final ProcessDefinition process;
 
     public Runner(Db db) {
+        this(db, ProcessDefinition.ORDER);
+    }
+
+    Runner(Db db, ProcessDefinition process) {
         this.db = db;
+        this.process = process;
     }
 
     /**
@@ -28,48 +33,72 @@ public class Runner {
      */
     public long start(FailurePlan plan) throws SQLException {
         long executionId = db.insertRunningExecution(plan);
-        runFrom(executionId, 1, plan);
+        run(executionId, plan);
         return executionId;
     }
 
     /**
-     * Retries a FAILED execution synchronously, resuming at its first step without a successful
-     * attempt; earlier steps are not rerun. Returns false, changing nothing, if the execution is
-     * unknown or not FAILED, including when a concurrent retry claimed it first.
+     * Retries a FAILED execution synchronously: every step without a successful attempt runs again
+     * once its dependencies have succeeded; succeeded steps are not rerun. Returns false, changing
+     * nothing, if the execution is unknown or not FAILED, including when a concurrent retry claimed it first.
      */
     public boolean retry(long executionId) throws SQLException {
         if (!db.claimForRetry(executionId)) {
             return false;
         }
-        FailurePlan plan = db.findExecution(executionId).orElseThrow().failurePlan();
-        runFrom(executionId, db.firstUnfinishedStep(executionId, STEPS.size()), plan);
+        run(executionId, db.findExecution(executionId).orElseThrow().failurePlan());
         return true;
     }
 
     /**
-     * Runs steps from fromStep until one fails or all succeed. A step failure is recorded on its
-     * attempt and fails the execution; later steps are not attempted. Database errors are not caught.
+     * Runs ready steps, in definition order, until none is left. Failure policy: once a step fails,
+     * no further step starts, even an independent one, and the execution fails. Database errors are
+     * not caught.
      */
-    private void runFrom(long executionId, int fromStep, FailurePlan plan) throws SQLException {
-        for (int stepIndex = fromStep; stepIndex <= STEPS.size(); stepIndex++) {
-            int attemptNo = db.nextAttemptNo(executionId, stepIndex);
-            long attemptId = db.insertRunningAttempt(executionId, stepIndex, STEPS.get(stepIndex - 1), attemptNo);
-            try {
-                runStep(stepIndex, attemptNo, plan);
-            } catch (RuntimeException e) {
-                db.failAttempt(attemptId, e.getMessage(), stackTrace(e));
+    private void run(long executionId, FailurePlan plan) throws SQLException {
+        Set<String> succeeded = new HashSet<>();
+        for (int index : db.succeededSteps(executionId)) {
+            succeeded.add(process.step(index).name());
+        }
+        Optional<StepDef> next;
+        while ((next = nextReadyStep(succeeded)).isPresent()) {
+            if (!runAttempt(executionId, next.get(), plan)) {
                 db.finishExecution(executionId, "FAILED");
                 return;
             }
-            db.finishAttempt(attemptId, "SUCCEEDED");
+            succeeded.add(next.get().name());
+        }
+        if (succeeded.size() != process.size()) { // impossible for a valid DAG; fail loudly if not
+            throw new IllegalStateException("Execution " + executionId + " stalled with steps " + succeeded + " done");
         }
         db.finishExecution(executionId, "SUCCEEDED");
     }
 
+    private Optional<StepDef> nextReadyStep(Set<String> succeeded) {
+        return process.steps().stream()
+                .filter(step -> !succeeded.contains(step.name()))
+                .filter(step -> succeeded.containsAll(step.dependsOn()))
+                .findFirst();
+    }
+
+    /** Runs one attempt of a step and records its outcome. Returns whether it succeeded. */
+    private boolean runAttempt(long executionId, StepDef step, FailurePlan plan) throws SQLException {
+        int attemptNo = db.nextAttemptNo(executionId, step.index());
+        long attemptId = db.insertRunningAttempt(executionId, step.index(), step.name(), attemptNo);
+        try {
+            simulateWork(step, attemptNo, plan);
+        } catch (RuntimeException e) {
+            db.failAttempt(attemptId, e.getMessage(), stackTrace(e));
+            return false;
+        }
+        db.finishAttempt(attemptId, "SUCCEEDED");
+        return true;
+    }
+
     /** The simulated work of one step: does nothing unless the plan says this attempt fails. */
-    private static void runStep(int stepIndex, int attemptNo, FailurePlan plan) {
-        if (plan != null && plan.failsOn(stepIndex, attemptNo)) {
-            throw new SimulatedStepFailure(STEPS.get(stepIndex - 1) + " failed (simulated failure "
+    private static void simulateWork(StepDef step, int attemptNo, FailurePlan plan) {
+        if (plan != null && plan.failsOn(step.index(), attemptNo)) {
+            throw new SimulatedStepFailure(step.name() + " failed (simulated failure "
                     + attemptNo + " of " + plan.failTimes() + ")");
         }
     }

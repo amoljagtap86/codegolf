@@ -39,15 +39,30 @@
                 ? el("button", {id: "retry", type: "button", class: "primary"}, "Retry from failed step")
                 : null;
 
-            const timeline = steps.map((name, i) => {
-                const view = stepView(execution, i + 1);
+            const failedNames = steps.filter(s => stepView(execution, s.index).status === "FAILED").map(s => s.name);
+
+            const stepCard = step => {
+                const view = stepView(execution, step.index);
                 return el("li", {class: view.status === "PENDING" ? "pending" : null},
-                    el("div", {class: "step-title"}, `${i + 1}. ${name}`, badge(view.status),
+                    el("div", {class: "step-title"}, `${step.index}. ${step.name}`, badge(view.status),
                         view.attempts.length > 1 ? el("span", {class: "muted"}, `${view.attempts.length} attempts`) : null),
+                    step.dependsOn.length ? el("div", {class: "muted after"}, `after ${step.dependsOn.join(", ")}`) : null,
                     view.attempts.length
                         ? el("div", {class: "table-wrap"}, el("table", {class: "attempts"}, el("tbody", {}, ...view.attempts.map(attemptRow))))
-                        : el("div", {class: "muted"}, "Not attempted"));
-            });
+                        : el("div", {class: "muted"}, execution.status === "FAILED"
+                            ? `Not started: ${failedNames.join(", ")} failed`
+                            : "Not started yet"));
+            };
+
+            const stageCount = Math.max(...steps.map(s => s.stage));
+            const timeline = [];
+            for (let stage = 1; stage <= stageCount; stage++) {
+                const inStage = steps.filter(s => s.stage === stage);
+                timeline.push(el("li", {class: "stage"},
+                    el("div", {class: "stage-title"}, `Stage ${stage}`,
+                        inStage.length > 1 ? el("span", {class: "muted"}, ` · ${inStage.length} independent steps`) : null),
+                    el("ol", {class: "timeline"}, ...inStage.map(stepCard))));
+            }
 
             document.getElementById("content").replaceChildren(...[
                 el("h1", {}, `Execution #${execution.id} `, badge(execution.status)),
@@ -59,7 +74,7 @@
                 el("div", {id: "message"}),
                 retryButton,
                 el("h2", {}, "Timeline"),
-                el("ol", {class: "timeline"}, ...timeline),
+                el("ol", {class: "stages"}, ...timeline),
             ].filter(Boolean)); // replaceChildren() would render a null retryButton as the text "null"
 
             if (retryButton) {

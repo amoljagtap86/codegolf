@@ -149,8 +149,11 @@ class ExecutionApiTest {
 
     @Test
     void stepsReturnsProcessDefinition() throws Exception {
-        assertEquals("[\"VALIDATE_ORDER\",\"RESERVE_INVENTORY\",\"CHARGE_PAYMENT\",\"CREATE_SHIPMENT\",\"SEND_CONFIRMATION\"]",
-                get("/api/executions/steps").body());
+        String body = get("/api/executions/steps").body();
+        assertTrue(body.startsWith("[{\"index\":1,\"name\":\"VALIDATE_ORDER\",\"dependsOn\":[],\"stage\":1}"), body);
+        assertTrue(body.contains(
+                "{\"index\":4,\"name\":\"CREATE_SHIPMENT\",\"dependsOn\":[\"RESERVE_INVENTORY\",\"CHARGE_PAYMENT\"],\"stage\":3}"),
+                body);
     }
 
     @Test

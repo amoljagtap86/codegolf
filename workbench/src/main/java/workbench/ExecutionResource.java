@@ -59,11 +59,11 @@ public class ExecutionResource {
         return get(id);
     }
 
-    /** The process definition, so the UI shows names for steps not attempted yet. */
+    /** The process DAG: steps with their dependencies and stage, so the UI can lay out the timeline. */
     @GET
     @Path("steps")
-    public List<String> steps() {
-        return Runner.STEPS;
+    public List<ProcessDefinition.StepDef> steps() {
+        return ProcessDefinition.ORDER.steps();
     }
 
     /** Error response with a JSON body {"error": message}. */

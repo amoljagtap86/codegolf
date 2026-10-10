@@ -13,9 +13,11 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * All SQL lives here. One connection per call, auto-commit on: every state
@@ -99,18 +101,19 @@ public class Db {
         }
     }
 
-    /** The first step (1-based) without a SUCCEEDED attempt; stepCount + 1 if all succeeded. */
-    public int firstUnfinishedStep(long executionId, int stepCount) throws SQLException {
+    /** Indexes of the steps that have a SUCCEEDED attempt. */
+    public Set<Integer> succeededSteps(long executionId) throws SQLException {
         try (Connection c = connect();
-             PreparedStatement ps = c.prepareStatement("""
-                     SELECT coalesce(min(s), ? + 1) FROM generate_series(1, ?) AS s
-                     WHERE NOT EXISTS (
-                         SELECT 1 FROM step_attempts a
-                         WHERE a.execution_id = ? AND a.step_index = s AND a.status = 'SUCCEEDED')""")) {
-            ps.setInt(1, stepCount);
-            ps.setInt(2, stepCount);
-            ps.setLong(3, executionId);
-            return (int) singleLong(ps);
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT DISTINCT step_index FROM step_attempts WHERE execution_id = ? AND status = 'SUCCEEDED'")) {
+            ps.setLong(1, executionId);
+            Set<Integer> steps = new HashSet<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    steps.add(rs.getInt(1));
+                }
+            }
+            return steps;
         }
     }
 

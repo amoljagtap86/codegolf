@@ -7,8 +7,8 @@ package workbench;
 public record FailurePlan(int failStep, Integer failTimes) {
 
     public FailurePlan {
-        if (failStep < 1 || failStep > Runner.STEPS.size()) {
-            throw new IllegalArgumentException("failStep must be between 1 and " + Runner.STEPS.size());
+        if (failStep < 1 || failStep > ProcessDefinition.ORDER.size()) {
+            throw new IllegalArgumentException("failStep must be between 1 and " + ProcessDefinition.ORDER.size());
         }
         if (failTimes == null) {
             failTimes = 1;

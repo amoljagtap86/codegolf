@@ -36,14 +36,15 @@ class RunnerTest {
         for (int i = 0; i < attempts.size(); i++) {
             StepAttempt attempt = attempts.get(i);
             assertEquals(i + 1, attempt.stepIndex());
-            assertEquals(Runner.STEPS.get(i), attempt.stepName());
+            assertEquals(ProcessDefinition.ORDER.step(i + 1).name(), attempt.stepName());
             assertEquals(1, attempt.attemptNo());
             assertEquals("SUCCEEDED", attempt.status());
             assertNull(attempt.errorMessage());
             assertNotNull(attempt.finishedAt());
-            if (i > 0) {
-                // Sequential: a step never starts before the previous one finished.
-                assertFalse(attempt.startedAt().isBefore(attempts.get(i - 1).finishedAt()));
+            // DAG order: a step never starts before all of its dependencies finished.
+            for (String dependency : ProcessDefinition.ORDER.step(i + 1).dependsOn()) {
+                StepAttempt dep = attempts.stream().filter(a -> a.stepName().equals(dependency)).findFirst().orElseThrow();
+                assertFalse(attempt.startedAt().isBefore(dep.finishedAt()), attempt.stepName() + " before " + dependency);
             }
         }
     }

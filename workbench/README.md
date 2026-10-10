@@ -1,9 +1,13 @@
 # Orchestration Reliability Workbench
 
-A small workbench that simulates a five-step business process and records every
-execution and step attempt in PostgreSQL.
+A small workbench that simulates a five-step business process, defined as a DAG, and records
+every execution and step attempt in PostgreSQL.
 
-Steps: `VALIDATE_ORDER → RESERVE_INVENTORY → CHARGE_PAYMENT → CREATE_SHIPMENT → SEND_CONFIRMATION`
+```
+                 ┌─► RESERVE_INVENTORY ─┐
+VALIDATE_ORDER ──┤                      ├─► CREATE_SHIPMENT ─► SEND_CONFIRMATION
+                 └─► CHARGE_PAYMENT ────┘
+```
 
 Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, PostgreSQL, JUnit 5.
 
@@ -13,6 +17,8 @@ Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, Post
 - [x] Milestone 2: failure injection and error capture
 - [x] Milestone 3: retry from the failed step (including repeated and concurrent retry requests)
 - [x] Milestone 4: execution history and web UI
+- [x] Milestone 5a: process as a DAG, run one step at a time
+- [ ] Milestone 5b: run independent steps in parallel
 
 ## Prerequisites
 
@@ -95,7 +101,7 @@ inserted with `textContent`/`createElement`, never `innerHTML`.
 |--------|------------------------|-------------|
 | GET    | `/`                    | Web UI (static files from `src/main/resources/static`). |
 | GET    | `/api/executions`      | Execution history, newest first: summaries with `attemptCount` and `retryCount`. `?limit=` 1–200, default 50; otherwise `400`. |
-| GET    | `/api/executions/steps` | The process definition: the five step names in order. |
+| GET    | `/api/executions/steps` | The process DAG: `[{"index", "name", "dependsOn", "stage"}]` in definition order. |
 | POST   | `/api/executions`      | Create an execution and run its steps synchronously. Returns `201` with the execution, also when the process failed (`status: FAILED`). Optional JSON body, see below. |
 | GET    | `/api/executions/{id}` | The execution and all its step attempts. `404` if unknown. |
 | POST   | `/api/executions/{id}/retry` | Retry a `FAILED` execution from its failed step. `200` with the execution after the retry ran (it may be `FAILED` again). `409` if the execution is not `FAILED`, including when a concurrent retry got there first. `404` if unknown. |
@@ -116,9 +122,24 @@ inserted with `textContent`/`createElement`, never `innerHTML`.
 When a step fails, its attempt is marked `FAILED` with `errorMessage` and `errorDetail` (stack trace),
 the execution is marked `FAILED`, and later steps are not attempted (they have no attempt rows).
 
+### Process definition and scheduling
+
+The DAG is defined in code (`ProcessDefinition.ORDER`) and validated at startup: step names are
+unique, and every dependency must name a step defined *earlier* in the list. That one rule rejects
+unknown dependencies and cycles, and makes definition order a valid execution order. `stage` is the
+dependency depth, used by the UI to group the timeline.
+
+- A step is **ready** when all its dependencies have succeeded and it has not. The runner repeatedly
+  runs the first ready step (milestone 5a runs one step at a time) until none is left.
+- **Failure policy:** once a step fails, no further step starts, not even an independent one, and
+  the execution fails. Example: if `RESERVE_INVENTORY` fails, `CHARGE_PAYMENT` is not started, so a
+  customer is never charged for an order that cannot ship.
+- The graph is not versioned per execution: if it changes, retries of old executions use the new graph.
+
 ### Retry semantics
 
-- A retry resumes at the first step without a successful attempt. Earlier steps are never rerun.
+- A retry runs every step without a successful attempt, each once its dependencies have succeeded.
+  Succeeded steps are never rerun.
 - Each retry adds new attempt rows (`attempt_no` 2, 3, ...); earlier attempts are kept as history.
 - Only one retry can run at a time: the retry first claims the execution with a single atomic
   `UPDATE ... SET status = 'RUNNING' WHERE status = 'FAILED'`. Concurrent or repeated requests

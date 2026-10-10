@@ -72,6 +72,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .header { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-top: 12px; }
 .header div span { display: block; font-size: 13px; color: var(--muted); }
 
+ol.stages { list-style: none; padding: 0; margin: 0; }
+li.stage { margin-bottom: 14px; padding-left: 14px; border-left: 3px solid var(--border); }
+.stage-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.stage-title span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.after { font-size: 13px; }
 ol.timeline { list-style: none; padding: 0; margin: 0; }
 ol.timeline > li { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; padding: 10px 14px; }
 ol.timeline > li.pending { opacity: 0.55; }

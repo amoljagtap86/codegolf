@@ -34,7 +34,7 @@
 
         async function loadSteps() {
             const steps = await api("/api/executions/steps");
-            steps.forEach((name, i) => failStep.append(el("option", {value: i + 1}, `${i + 1}. ${name}`)));
+            steps.forEach(s => failStep.append(el("option", {value: s.index}, `${s.index}. ${s.name}`)));
         }
 
         async function loadHistory() {
