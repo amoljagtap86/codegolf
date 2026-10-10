@@ -24,9 +24,10 @@ public class ExecutionResource {
         this.runner = runner;
     }
 
+    /** Body is an optional {@link FailurePlan}; no body = happy path. A failed process is still 201. */
     @POST
-    public Response create(@Context UriInfo uriInfo) throws SQLException {
-        long id = runner.start();
+    public Response create(FailurePlan plan, @Context UriInfo uriInfo) throws SQLException {
+        long id = runner.start(plan);
         return Response.created(uriInfo.getAbsolutePathBuilder().path(Long.toString(id)).build())
                 .entity(get(id))
                 .build();

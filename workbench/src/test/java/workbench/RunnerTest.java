@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +23,7 @@ class RunnerTest {
 
     @Test
     void normalExecutionRunsAllFiveStepsOnceInOrder() throws Exception {
-        long id = runner.start();
+        long id = runner.start(null);
 
         Execution execution = db.findExecution(id).orElseThrow();
         assertEquals("SUCCEEDED", execution.status());
@@ -45,6 +46,30 @@ class RunnerTest {
                 assertFalse(attempt.startedAt().isBefore(attempts.get(i - 1).finishedAt()));
             }
         }
+    }
+
+    @Test
+    void failedStepFailsExecutionAndLaterStepsAreNotAttempted() throws Exception {
+        long id = runner.start(new FailurePlan(3, 1));
+
+        Execution execution = db.findExecution(id).orElseThrow();
+        assertEquals("FAILED", execution.status());
+        assertNotNull(execution.finishedAt());
+        assertEquals(new FailurePlan(3, 1), execution.failurePlan());
+
+        List<StepAttempt> attempts = execution.attempts();
+        assertEquals(3, attempts.size(), "steps 4 and 5 must have no attempts");
+        assertEquals("SUCCEEDED", attempts.get(0).status());
+        assertEquals("SUCCEEDED", attempts.get(1).status());
+
+        StepAttempt failed = attempts.get(2);
+        assertEquals(3, failed.stepIndex());
+        assertEquals("CHARGE_PAYMENT", failed.stepName());
+        assertEquals(1, failed.attemptNo());
+        assertEquals("FAILED", failed.status());
+        assertNotNull(failed.finishedAt());
+        assertEquals("CHARGE_PAYMENT failed (simulated failure 1 of 1)", failed.errorMessage());
+        assertTrue(failed.errorDetail().contains("SimulatedStepFailure"), failed.errorDetail());
     }
 
     @Test

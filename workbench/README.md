@@ -10,7 +10,7 @@ Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, Post
 ## Status
 
 - [x] Milestone 1: run all five steps (happy path), persist the execution and its attempts, JSON API
-- [ ] Milestone 2: failure injection and error capture
+- [x] Milestone 2: failure injection and error capture
 - [ ] Milestone 3: retry from the failed step (including repeated and concurrent retry requests)
 - [ ] Milestone 4: execution history and web UI
 
@@ -68,6 +68,10 @@ Then open http://localhost:8080/ for the web UI (currently a hello-world page), 
 ```bash
 curl -i -X POST http://localhost:8080/api/executions   # start and run an execution
 curl http://localhost:8080/api/executions/1            # inspect it
+
+# simulate a failure: step 3 fails on its first attempt
+curl -i -X POST http://localhost:8080/api/executions \
+     -H 'Content-Type: application/json' -d '{"failStep": 3, "failTimes": 1}'
 ```
 
 ## API
@@ -75,14 +79,37 @@ curl http://localhost:8080/api/executions/1            # inspect it
 | Method | Path                   | Description |
 |--------|------------------------|-------------|
 | GET    | `/`                    | Web UI (static files from `src/main/resources/static`). |
-| POST   | `/api/executions`      | Create an execution and run all steps synchronously. Returns `201` with the execution. |
+| POST   | `/api/executions`      | Create an execution and run its steps synchronously. Returns `201` with the execution, also when the process failed (`status: FAILED`). Optional JSON body, see below. |
 | GET    | `/api/executions/{id}` | The execution and all its step attempts. `404` if unknown. |
+
+### Simulating failures
+
+`POST /api/executions` accepts an optional failure plan:
+
+```json
+{"failStep": 3, "failTimes": 1}
+```
+
+- `failStep` (1–5): the step that fails.
+- `failTimes` (≥ 1, default 1): how many attempts of that step fail before it succeeds (matters once retry exists).
+- No body: happy path. Invalid plan or malformed JSON: `400`, nothing is created.
+
+When a step fails, its attempt is marked `FAILED` with `errorMessage` and `errorDetail` (stack trace),
+the execution is marked `FAILED`, and later steps are not attempted (they have no attempt rows).
 
 ## Data model
 
 - `executions`: one row per process run (`status`, `created_at`, `started_at`, `finished_at`).
 - `step_attempts`: append-only, one row per attempt of a step (`step_index`, `attempt_no`,
   `status`, error fields, timestamps). A step's current status is its latest attempt.
+
+## Known limitations
+
+- An execution whose process crashes mid-run (e.g. the JVM dies or the database goes away) stays
+  `RUNNING`; there is no recovery yet.
+- Requests with an `Upgrade: h2c` header (Java's `HttpClient` with default settings, `curl --http2`)
+  and a body hang for 30 s and fail with `500`: Grizzly withholds the body of upgrade requests.
+  Browsers and plain `curl` are not affected. Use HTTP/1.1 in Java clients.
 
 ## Troubleshooting
 

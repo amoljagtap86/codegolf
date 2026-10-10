@@ -15,7 +15,9 @@ import org.junit.jupiter.api.Test;
 /** Starts the real HTTP server on a free port and calls it over HTTP. */
 class ExecutionApiTest {
 
-    private final HttpClient client = HttpClient.newHttpClient();
+    // HTTP/1.1: the default (HTTP/2) sends "Upgrade: h2c" on plain http, and Grizzly then withholds
+    // the request body, so any POST with a body hangs for 30 s and fails. See README, Known limitations.
+    private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
     private HttpServer server;
     private String baseUrl;
 
@@ -47,6 +49,27 @@ class ExecutionApiTest {
     }
 
     @Test
+    void postWithFailurePlanReturns201WithFailedExecution() throws Exception {
+        HttpResponse<String> created = postJson("{\"failStep\": 2}");
+        assertEquals(201, created.statusCode());
+        assertTrue(created.body().contains("\"status\":\"FAILED\""), created.body());
+        assertTrue(created.body().contains("\"failurePlan\":{\"failStep\":2,\"failTimes\":1}"), created.body());
+        assertTrue(created.body().contains("\"errorMessage\":\"RESERVE_INVENTORY failed"), created.body());
+    }
+
+    @Test
+    void invalidFailurePlanReturns400AndCreatesNothing() throws Exception {
+        assertEquals(400, postJson("{\"failStep\": 7}").statusCode());
+        assertEquals(400, postJson("{\"failStep\": 1, \"failTimes\": 0}").statusCode());
+        assertEquals(400, postJson("{not json").statusCode());
+
+        // Ids restart at 1 per test, so nothing created means execution 1 does not exist.
+        HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/api/executions/1"))
+                .GET().build());
+        assertEquals(404, response.statusCode());
+    }
+
+    @Test
     void getUnknownExecutionReturns404() throws Exception {
         HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/api/executions/999"))
                 .GET().build());
@@ -69,6 +92,12 @@ class ExecutionApiTest {
     void missingStaticFileReturns404() throws Exception {
         HttpResponse<String> response = send(HttpRequest.newBuilder(URI.create(baseUrl + "/nope.html")).GET().build());
         assertEquals(404, response.statusCode());
+    }
+
+    private HttpResponse<String> postJson(String json) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/api/executions"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json)).build());
     }
 
     private HttpResponse<String> send(HttpRequest request) throws Exception {

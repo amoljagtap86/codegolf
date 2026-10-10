@@ -63,10 +63,14 @@ public class Db {
         }
     }
 
-    public long insertRunningExecution() throws SQLException {
+    /** @param plan stored as jsonb so a retry (milestone 3) replays the same plan; null = happy path */
+    public long insertRunningExecution(FailurePlan plan) throws SQLException {
         try (Connection c = connect();
-             PreparedStatement ps = c.prepareStatement(
-                     "INSERT INTO executions (status, started_at) VALUES ('RUNNING', now()) RETURNING id")) {
+             PreparedStatement ps = c.prepareStatement("""
+                     INSERT INTO executions (status, started_at, failure_plan)
+                     VALUES ('RUNNING', now(), ?::jsonb) RETURNING id""")) {
+            ps.setString(1, plan == null ? null
+                    : "{\"failStep\": " + plan.failStep() + ", \"failTimes\": " + plan.failTimes() + "}");
             return singleLong(ps);
         }
     }
@@ -105,6 +109,19 @@ public class Db {
         }
     }
 
+    public void failAttempt(long attemptId, String errorMessage, String errorDetail) throws SQLException {
+        try (Connection c = connect();
+             PreparedStatement ps = c.prepareStatement("""
+                     UPDATE step_attempts
+                     SET status = 'FAILED', finished_at = now(), error_message = ?, error_detail = ?
+                     WHERE id = ?""")) {
+            ps.setString(1, errorMessage);
+            ps.setString(2, errorDetail);
+            ps.setLong(3, attemptId);
+            ps.executeUpdate();
+        }
+    }
+
     public Optional<Execution> findExecution(long executionId) throws SQLException {
         try (Connection c = connect()) {
             List<StepAttempt> attempts = new ArrayList<>();
@@ -129,16 +146,22 @@ public class Db {
                     }
                 }
             }
-            try (PreparedStatement ps = c.prepareStatement(
-                    "SELECT id, status, created_at, started_at, finished_at FROM executions WHERE id = ?")) {
+            try (PreparedStatement ps = c.prepareStatement("""
+                    SELECT id, status, created_at, started_at, finished_at,
+                           (failure_plan ->> 'failStep')::int AS fail_step,
+                           (failure_plan ->> 'failTimes')::int AS fail_times
+                    FROM executions WHERE id = ?""")) {
                 ps.setLong(1, executionId);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (!rs.next()) {
                         return Optional.empty();
                     }
+                    int failStep = rs.getInt("fail_step");
+                    FailurePlan plan = rs.wasNull() ? null : new FailurePlan(failStep, rs.getInt("fail_times"));
                     return Optional.of(new Execution(
                             rs.getLong("id"),
                             rs.getString("status"),
+                            plan,
                             rs.getObject("created_at", OffsetDateTime.class),
                             rs.getObject("started_at", OffsetDateTime.class),
                             rs.getObject("finished_at", OffsetDateTime.class),
