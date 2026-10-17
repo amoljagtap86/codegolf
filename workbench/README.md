@@ -18,7 +18,7 @@ Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, Post
 - [x] Milestone 3: retry from the failed step (including repeated and concurrent retry requests)
 - [x] Milestone 4: execution history and web UI
 - [x] Milestone 5a: process as a DAG, run one step at a time
-- [ ] Milestone 5b: run independent steps in parallel
+- [x] Milestone 5b: run independent steps in parallel
 
 ## Prerequisites
 
@@ -79,15 +79,21 @@ curl http://localhost:8080/api/executions/1            # inspect it
 curl -i -X POST http://localhost:8080/api/executions \
      -H 'Content-Type: application/json' -d '{"failStep": 3, "failTimes": 1}'
 
+# make every step take 400 ms so the parallel branches visibly overlap
+curl -i -X POST http://localhost:8080/api/executions \
+     -H 'Content-Type: application/json' -d '{"failStep": 2, "stepDelayMs": 400}'
+
 # retry it from the failed step (use the id returned above)
 curl -i -X POST http://localhost:8080/api/executions/2/retry
 ```
 
 ## Web UI
 
-- **`/`**: start an execution (optionally choosing a failing step and how many times it fails) and
+- **`/`**: start an execution (optionally choosing a failing step, how many times it fails, and a
+  per-step delay) and
   browse the execution history, newest first, with attempt and retry counts.
-- **`/execution.html?id=N`**: the step-by-step timeline. Each step shows its derived status
+- **`/execution.html?id=N`**: a Gantt chart of every attempt on one time axis (parallel attempts
+  overlap), then the step-by-step timeline grouped by stage. Each step shows its derived status
   (`PENDING` = not attempted yet) and every attempt with start time, duration, error message, and
   a collapsible stack trace. A **Retry from failed step** button appears for `FAILED` executions;
   if the retry is rejected (e.g. another tab retried first), the server's `409` message is shown.
@@ -106,18 +112,21 @@ inserted with `textContent`/`createElement`, never `innerHTML`.
 | GET    | `/api/executions/{id}` | The execution and all its step attempts. `404` if unknown. |
 | POST   | `/api/executions/{id}/retry` | Retry a `FAILED` execution from its failed step. `200` with the execution after the retry ran (it may be `FAILED` again). `409` if the execution is not `FAILED`, including when a concurrent retry got there first. `404` if unknown. |
 
-### Simulating failures
+### Simulation settings
 
-`POST /api/executions` accepts an optional failure plan:
+`POST /api/executions` accepts an optional simulation; every field is optional:
 
 ```json
-{"failStep": 3, "failTimes": 1}
+{"failStep": 3, "failTimes": 1, "stepDelayMs": 400}
 ```
 
 - `failStep` (1–5): the step that fails.
-- `failTimes` (≥ 1, default 1): how many attempts of that step fail before it succeeds. The plan is
-  stored with the execution, so retries replay it: with `failTimes: 2` the first retry fails again.
-- No body: happy path. Invalid plan or malformed JSON: `400`, nothing is created.
+- `failTimes` (≥ 1, default 1; requires `failStep`): how many attempts of that step fail before it succeeds.
+- `stepDelayMs` (0–5000, default 0): how long each successful attempt takes. A simulated failure is
+  immediate, so when a step fails its parallel siblings are reliably still running.
+- The simulation is stored with the execution (returned as `simulation`), so retries replay it:
+  with `failTimes: 2` the first retry fails again.
+- No body: happy path without delay. Invalid values or malformed JSON: `400`, nothing is created.
 
 When a step fails, its attempt is marked `FAILED` with `errorMessage` and `errorDetail` (stack trace),
 the execution is marked `FAILED`, and later steps are not attempted (they have no attempt rows).
@@ -129,11 +138,15 @@ unique, and every dependency must name a step defined *earlier* in the list. Tha
 unknown dependencies and cycles, and makes definition order a valid execution order. `stage` is the
 dependency depth, used by the UI to group the timeline.
 
-- A step is **ready** when all its dependencies have succeeded and it has not. The runner repeatedly
-  runs the first ready step (milestone 5a runs one step at a time) until none is left.
-- **Failure policy:** once a step fails, no further step starts, not even an independent one, and
-  the execution fails. Example: if `RESERVE_INVENTORY` fails, `CHARGE_PAYMENT` is not started, so a
-  customer is never charged for an order that cannot ship.
+- A step is **ready** when all its dependencies have succeeded and it has not run yet. Every ready
+  step starts at once, each on its own virtual thread; the request thread coordinates: it waits for
+  any step to finish, then starts the steps that became ready. `RESERVE_INVENTORY` and
+  `CHARGE_PAYMENT` therefore run in parallel. Each run uses its own executor, and closing it waits
+  for every step, so no step outlives the request.
+- **Failure policy:** once a step fails, no further step starts, not even an independent one.
+  Steps already running finish and are recorded; then the execution fails. Example: if
+  `RESERVE_INVENTORY` fails before `CHARGE_PAYMENT` started, the customer is not charged; if
+  `CHARGE_PAYMENT` was already running, it completes, and a retry does not charge again.
 - The graph is not versioned per execution: if it changes, retries of old executions use the new graph.
 
 ### Retry semantics

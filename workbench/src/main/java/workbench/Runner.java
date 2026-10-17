@@ -4,13 +4,19 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.sql.SQLException;
 import java.util.HashSet;
-import java.util.Optional;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import workbench.ProcessDefinition.StepDef;
 
 /**
- * Runs a process DAG, one step at a time (milestone 5a). A step is ready when all its dependencies
- * have succeeded and it has not; the runner keeps running a ready step until none is left.
+ * Runs a process DAG with independent steps in parallel. A step is ready when all its dependencies
+ * have succeeded and it has not run yet in this run; every ready step starts at once, each on its
+ * own virtual thread, while the calling thread coordinates and waits.
  */
 public class Runner {
 
@@ -29,11 +35,11 @@ public class Runner {
     /**
      * Creates an execution and runs it synchronously. Returns the execution id.
      *
-     * @param plan simulated failure, or null for the happy path
+     * @param simulation failure and delay settings, or null for the happy path without delays
      */
-    public long start(FailurePlan plan) throws SQLException {
-        long executionId = db.insertRunningExecution(plan);
-        run(executionId, plan);
+    public long start(Simulation simulation) throws SQLException {
+        long executionId = db.insertRunningExecution(simulation);
+        run(executionId, simulation);
         return executionId;
     }
 
@@ -46,47 +52,93 @@ public class Runner {
         if (!db.claimForRetry(executionId)) {
             return false;
         }
-        run(executionId, db.findExecution(executionId).orElseThrow().failurePlan());
+        run(executionId, db.findExecution(executionId).orElseThrow().simulation());
         return true;
     }
 
+    private record StepOutcome(StepDef step, boolean succeeded) {
+    }
+
     /**
-     * Runs ready steps, in definition order, until none is left. Failure policy: once a step fails,
-     * no further step starts, even an independent one, and the execution fails. Database errors are
-     * not caught.
+     * Runs ready steps in parallel until none is left. Failure policy: once a step fails, no further
+     * step starts, even an independent one; steps already running finish and are recorded; then the
+     * execution fails. A database error in any step is rethrown after the running steps finished,
+     * leaving the execution RUNNING (see README, Known limitations).
      */
-    private void run(long executionId, FailurePlan plan) throws SQLException {
+    private void run(long executionId, Simulation simulation) throws SQLException {
         Set<String> succeeded = new HashSet<>();
         for (int index : db.succeededSteps(executionId)) {
             succeeded.add(process.step(index).name());
         }
-        Optional<StepDef> next;
-        while ((next = nextReadyStep(succeeded)).isPresent()) {
-            if (!runAttempt(executionId, next.get(), plan)) {
-                db.finishExecution(executionId, "FAILED");
-                return;
+        Set<String> started = new HashSet<>(); // started in this run, whatever their outcome
+        boolean failed = false;
+        Throwable workerError = null;
+
+        // close() at the end of the block waits for every submitted step: none outlives the run.
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            CompletionService<StepOutcome> completions = new ExecutorCompletionService<>(executor);
+            int running = 0;
+            while (true) {
+                if (!failed) {
+                    for (StepDef step : readySteps(succeeded, started)) {
+                        started.add(step.name());
+                        completions.submit(() -> new StepOutcome(step, runAttempt(executionId, step, simulation)));
+                        running++;
+                    }
+                }
+                if (running == 0) {
+                    break;
+                }
+                try {
+                    StepOutcome outcome = completions.take().get();
+                    if (outcome.succeeded()) {
+                        succeeded.add(outcome.step().name());
+                    } else {
+                        failed = true;
+                    }
+                } catch (ExecutionException e) {
+                    failed = true; // stop starting steps, let the running ones finish, then rethrow
+                    if (workerError == null) {
+                        workerError = e.getCause();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while running execution " + executionId, e);
+                }
+                running--;
             }
-            succeeded.add(next.get().name());
         }
-        if (succeeded.size() != process.size()) { // impossible for a valid DAG; fail loudly if not
+
+        if (workerError instanceof SQLException e) {
+            throw e;
+        } else if (workerError instanceof RuntimeException e) {
+            throw e;
+        } else if (workerError != null) {
+            throw new IllegalStateException("Step failed unexpectedly in execution " + executionId, workerError);
+        }
+        if (failed) {
+            db.finishExecution(executionId, "FAILED");
+        } else if (succeeded.size() == process.size()) {
+            db.finishExecution(executionId, "SUCCEEDED");
+        } else { // impossible for a valid DAG; fail loudly if not
             throw new IllegalStateException("Execution " + executionId + " stalled with steps " + succeeded + " done");
         }
-        db.finishExecution(executionId, "SUCCEEDED");
     }
 
-    private Optional<StepDef> nextReadyStep(Set<String> succeeded) {
+    /** Steps not started in this run whose dependencies have all succeeded, in definition order. */
+    private List<StepDef> readySteps(Set<String> succeeded, Set<String> started) {
         return process.steps().stream()
-                .filter(step -> !succeeded.contains(step.name()))
+                .filter(step -> !succeeded.contains(step.name()) && !started.contains(step.name()))
                 .filter(step -> succeeded.containsAll(step.dependsOn()))
-                .findFirst();
+                .toList();
     }
 
     /** Runs one attempt of a step and records its outcome. Returns whether it succeeded. */
-    private boolean runAttempt(long executionId, StepDef step, FailurePlan plan) throws SQLException {
+    private boolean runAttempt(long executionId, StepDef step, Simulation simulation) throws SQLException {
         int attemptNo = db.nextAttemptNo(executionId, step.index());
         long attemptId = db.insertRunningAttempt(executionId, step.index(), step.name(), attemptNo);
         try {
-            simulateWork(step, attemptNo, plan);
+            simulateWork(step, attemptNo, simulation);
         } catch (RuntimeException e) {
             db.failAttempt(attemptId, e.getMessage(), stackTrace(e));
             return false;
@@ -95,11 +147,25 @@ public class Runner {
         return true;
     }
 
-    /** The simulated work of one step: does nothing unless the plan says this attempt fails. */
-    private static void simulateWork(StepDef step, int attemptNo, FailurePlan plan) {
-        if (plan != null && plan.failsOn(step.index(), attemptNo)) {
+    /**
+     * The simulated work of one step. A simulated failure happens immediately; a successful attempt
+     * takes stepDelayMs. So when a step fails, its parallel siblings are reliably still running.
+     */
+    private static void simulateWork(StepDef step, int attemptNo, Simulation simulation) {
+        if (simulation == null) {
+            return;
+        }
+        if (simulation.failsOn(step.index(), attemptNo)) {
             throw new SimulatedStepFailure(step.name() + " failed (simulated failure "
-                    + attemptNo + " of " + plan.failTimes() + ")");
+                    + attemptNo + " of " + simulation.failTimes() + ")");
+        }
+        if (simulation.stepDelayMs() > 0) {
+            try {
+                Thread.sleep(simulation.stepDelayMs());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SimulatedStepFailure(step.name() + " interrupted");
+            }
         }
     }
 

@@ -46,11 +46,15 @@ function formatDuration(startIso, endIso) {
     return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
-function formatPlan(plan) {
-    if (!plan) {
-        return "none (happy path)";
+function formatSimulation(simulation) {
+    const parts = [];
+    if (simulation && simulation.failStep) {
+        parts.push(`step ${simulation.failStep} fails ${simulation.failTimes}×`);
     }
-    return `step ${plan.failStep} fails ${plan.failTimes}×`;
+    if (simulation && simulation.stepDelayMs) {
+        parts.push(`${simulation.stepDelayMs} ms per step`);
+    }
+    return parts.length ? parts.join(", ") : "none (happy path)";
 }
 
 /** Replaces the contents of the element with the given id by an error message. */

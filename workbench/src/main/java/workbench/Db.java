@@ -65,14 +65,15 @@ public class Db {
         }
     }
 
-    /** @param plan stored as jsonb so a retry (milestone 3) replays the same plan; null = happy path */
-    public long insertRunningExecution(FailurePlan plan) throws SQLException {
+    /** @param simulation stored as jsonb so a retry replays it; null = happy path, no delay */
+    public long insertRunningExecution(Simulation simulation) throws SQLException {
         try (Connection c = connect();
              PreparedStatement ps = c.prepareStatement("""
                      INSERT INTO executions (status, started_at, failure_plan)
                      VALUES ('RUNNING', now(), ?::jsonb) RETURNING id""")) {
-            ps.setString(1, plan == null ? null
-                    : "{\"failStep\": " + plan.failStep() + ", \"failTimes\": " + plan.failTimes() + "}");
+            ps.setString(1, simulation == null ? null
+                    : "{\"failStep\": " + simulation.failStep() + ", \"failTimes\": " + simulation.failTimes()
+                    + ", \"stepDelayMs\": " + simulation.stepDelayMs() + "}");
             return singleLong(ps);
         }
     }
@@ -190,8 +191,10 @@ public class Db {
             }
             try (PreparedStatement ps = c.prepareStatement("""
                     SELECT id, status, created_at, started_at, finished_at,
+                           failure_plan IS NOT NULL AS has_simulation,
                            (failure_plan ->> 'failStep')::int AS fail_step,
-                           (failure_plan ->> 'failTimes')::int AS fail_times
+                           (failure_plan ->> 'failTimes')::int AS fail_times,
+                           (failure_plan ->> 'stepDelayMs')::int AS step_delay_ms
                     FROM executions WHERE id = ?""")) {
                 ps.setLong(1, executionId);
                 try (ResultSet rs = ps.executeQuery()) {
@@ -201,7 +204,7 @@ public class Db {
                     return Optional.of(new Execution(
                             rs.getLong("id"),
                             rs.getString("status"),
-                            failurePlan(rs),
+                            simulation(rs),
                             rs.getObject("created_at", OffsetDateTime.class),
                             rs.getObject("started_at", OffsetDateTime.class),
                             rs.getObject("finished_at", OffsetDateTime.class),
@@ -216,8 +219,10 @@ public class Db {
         try (Connection c = connect();
              PreparedStatement ps = c.prepareStatement("""
                      SELECT e.id, e.status, e.created_at, e.finished_at,
+                            e.failure_plan IS NOT NULL AS has_simulation,
                             (e.failure_plan ->> 'failStep')::int AS fail_step,
                             (e.failure_plan ->> 'failTimes')::int AS fail_times,
+                            (e.failure_plan ->> 'stepDelayMs')::int AS step_delay_ms,
                             count(a.id) AS attempt_count,
                             count(a.id) - count(DISTINCT a.step_index) AS retry_count
                      FROM executions e
@@ -232,7 +237,7 @@ public class Db {
                     summaries.add(new ExecutionSummary(
                             rs.getLong("id"),
                             rs.getString("status"),
-                            failurePlan(rs),
+                            simulation(rs),
                             rs.getObject("created_at", OffsetDateTime.class),
                             rs.getObject("finished_at", OffsetDateTime.class),
                             rs.getInt("attempt_count"),
@@ -243,10 +248,13 @@ public class Db {
         }
     }
 
-    /** Reads the fail_step / fail_times columns selected from executions.failure_plan; null if none. */
-    private static FailurePlan failurePlan(ResultSet rs) throws SQLException {
-        int failStep = rs.getInt("fail_step");
-        return rs.wasNull() ? null : new FailurePlan(failStep, rs.getInt("fail_times"));
+    /** Reads the simulation columns selected from executions.failure_plan; null if none was given. */
+    private static Simulation simulation(ResultSet rs) throws SQLException {
+        if (!rs.getBoolean("has_simulation")) {
+            return null;
+        }
+        return new Simulation((Integer) rs.getObject("fail_step"), (Integer) rs.getObject("fail_times"),
+                (Integer) rs.getObject("step_delay_ms")); // absent in rows from before milestone 5b: default 0
     }
 
     private static long singleLong(PreparedStatement ps) throws SQLException {

@@ -6,7 +6,7 @@ import java.time.OffsetDateTime;
 public record ExecutionSummary(
         long id,
         String status,
-        FailurePlan failurePlan,
+        Simulation simulation,
         OffsetDateTime createdAt,
         OffsetDateTime finishedAt,
         int attemptCount,

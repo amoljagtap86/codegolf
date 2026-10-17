@@ -50,16 +50,16 @@ class ExecutionApiTest {
     }
 
     @Test
-    void postWithFailurePlanReturns201WithFailedExecution() throws Exception {
+    void postWithSimulatedFailureReturns201WithFailedExecution() throws Exception {
         HttpResponse<String> created = postJson("{\"failStep\": 2}");
         assertEquals(201, created.statusCode());
         assertTrue(created.body().contains("\"status\":\"FAILED\""), created.body());
-        assertTrue(created.body().contains("\"failurePlan\":{\"failStep\":2,\"failTimes\":1}"), created.body());
+        assertTrue(created.body().contains("\"simulation\":{\"failStep\":2,\"failTimes\":1,\"stepDelayMs\":0}"), created.body());
         assertTrue(created.body().contains("\"errorMessage\":\"RESERVE_INVENTORY failed"), created.body());
     }
 
     @Test
-    void invalidFailurePlanReturns400AndCreatesNothing() throws Exception {
+    void invalidSimulationReturns400AndCreatesNothing() throws Exception {
         assertEquals(400, postJson("{\"failStep\": 7}").statusCode());
         assertEquals(400, postJson("{\"failStep\": 1, \"failTimes\": 0}").statusCode());
         assertEquals(400, postJson("{not json").statusCode());
@@ -129,10 +129,10 @@ class ExecutionApiTest {
         String body = response.body();
         assertTrue(body.indexOf("\"id\":2") < body.indexOf("\"id\":1"), "newest first: " + body);
         // Execution 2: step 1 once, step 2 three times, steps 3-5 once = 7 attempts, 2 retries.
-        assertTrue(body.contains("\"id\":2,\"status\":\"SUCCEEDED\",\"failurePlan\":{\"failStep\":2,\"failTimes\":2}"), body);
+        assertTrue(body.contains("\"id\":2,\"status\":\"SUCCEEDED\",\"simulation\":{\"failStep\":2,\"failTimes\":2,\"stepDelayMs\":0}"), body);
         assertTrue(body.contains("\"attemptCount\":7,\"retryCount\":2"), body);
         assertTrue(body.contains("\"attemptCount\":5,\"retryCount\":0"), body);
-        assertTrue(body.contains("\"failurePlan\":null"), body);
+        assertTrue(body.contains("\"simulation\":null"), body);
     }
 
     @Test

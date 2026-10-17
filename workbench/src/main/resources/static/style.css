@@ -95,3 +95,15 @@ pre { overflow-x: auto; font-size: 12px; background: var(--panel); padding: 8px;
 #message:empty { display: none; }
 #message { margin: 12px 0; }
 #retry { margin-top: 12px; }
+
+/* Gantt: one row per attempt; bars share the execution's time axis. */
+.gantt { padding: 10px 14px; }
+.gantt-row { display: flex; align-items: center; gap: 10px; height: 24px; }
+.gantt-label { flex: 0 0 210px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gantt-track { position: relative; flex: 1; height: 14px; background: var(--bg); border-radius: 4px; }
+.gantt-bar { position: absolute; top: 0; bottom: 0; min-width: 3px; border-radius: 4px; padding: 0; }
+.gantt-bar.badge-succeeded { background: var(--ok-fg); }
+.gantt-bar.badge-failed { background: var(--fail-fg); }
+.gantt-bar.badge-running { background: var(--run-fg); }
+.gantt-axis { flex: 1; display: flex; justify-content: space-between; font-size: 12px; }
+@media (max-width: 600px) { .gantt-label { flex-basis: 120px; } }

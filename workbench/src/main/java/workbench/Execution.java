@@ -6,7 +6,7 @@ import java.util.List;
 public record Execution(
         long id,
         String status,
-        FailurePlan failurePlan,
+        Simulation simulation,
         OffsetDateTime createdAt,
         OffsetDateTime startedAt,
         OffsetDateTime finishedAt,

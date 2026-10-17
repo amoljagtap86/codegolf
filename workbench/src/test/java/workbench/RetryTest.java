@@ -29,7 +29,7 @@ class RetryTest {
 
     @Test
     void retryResumesAtFailedStepWithoutRerunningEarlierSteps() throws Exception {
-        long id = runner.start(new FailurePlan(3, 1));
+        long id = runner.start(Simulation.failing(3, 1));
         Execution failed = db.findExecution(id).orElseThrow();
 
         assertTrue(runner.retry(id));
@@ -46,7 +46,7 @@ class RetryTest {
 
     @Test
     void retryThatFailsAgainRecordsNewAttemptAndCanBeRetriedAgain() throws Exception {
-        long id = runner.start(new FailurePlan(3, 2));
+        long id = runner.start(Simulation.failing(3, 2));
 
         assertTrue(runner.retry(id));
         Execution afterFirstRetry = db.findExecution(id).orElseThrow();
@@ -74,7 +74,7 @@ class RetryTest {
 
     @Test
     void repeatedRetryAfterSuccessfulRetryIsRejected() throws Exception {
-        long id = runner.start(new FailurePlan(1, 1));
+        long id = runner.start(Simulation.failing(1, 1));
         assertTrue(runner.retry(id));
         Execution afterRetry = db.findExecution(id).orElseThrow();
 
@@ -101,7 +101,7 @@ class RetryTest {
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         try {
             for (int round = 0; round < 10; round++) {
-                long id = runner.start(new FailurePlan(3, 1));
+                long id = runner.start(Simulation.failing(3, 1));
                 CyclicBarrier barrier = new CyclicBarrier(threads);
                 List<Future<Boolean>> results = new ArrayList<>();
                 for (int t = 0; t < threads; t++) {

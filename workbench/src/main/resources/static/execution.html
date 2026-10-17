@@ -33,6 +33,33 @@
                     a.errorDetail ? el("details", {}, el("summary", {}, "Stack trace"), el("pre", {}, a.errorDetail)) : null));
         }
 
+        /** One bar per attempt, positioned on the execution's time axis; parallel attempts overlap. */
+        function gantt(execution) {
+            const attempts = [...execution.attempts].sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
+            if (!attempts.length) {
+                return null;
+            }
+            const start = Math.min(...attempts.map(a => new Date(a.startedAt)));
+            const end = Math.max(...attempts.map(a => a.finishedAt ? new Date(a.finishedAt) : Date.now()));
+            const span = Math.max(end - start, 1);
+            const percent = ms => `${(100 * ms / span).toFixed(2)}%`;
+            return el("div", {class: "gantt panel"},
+                ...attempts.map(a => {
+                    const from = new Date(a.startedAt) - start;
+                    const to = (a.finishedAt ? new Date(a.finishedAt) : Date.now()) - start;
+                    return el("div", {class: "gantt-row"},
+                        el("div", {class: "gantt-label"}, `${a.stepIndex}. ${a.stepName} #${a.attemptNo}`),
+                        el("div", {class: "gantt-track"},
+                            el("div", {
+                                class: `gantt-bar badge-${a.status.toLowerCase()}`,
+                                style: `left: ${percent(from)}; width: ${percent(to - from)}`,
+                                title: `${a.status}, ${formatDuration(a.startedAt, a.finishedAt)}`,
+                            })));
+                }),
+                el("div", {class: "gantt-row muted"}, el("div", {class: "gantt-label"}, ""),
+                    el("div", {class: "gantt-axis"}, el("span", {}, "0"), el("span", {}, formatDuration(new Date(start).toISOString(), new Date(end).toISOString())))));
+        }
+
         function render(execution) {
             document.title = `Execution #${execution.id} · Orchestration Workbench`;
             const retryButton = execution.status === "FAILED"
@@ -67,12 +94,14 @@
             document.getElementById("content").replaceChildren(...[
                 el("h1", {}, `Execution #${execution.id} `, badge(execution.status)),
                 el("div", {class: "header panel"},
-                    el("div", {}, el("span", {}, "Failure plan"), formatPlan(execution.failurePlan)),
+                    el("div", {}, el("span", {}, "Simulation"), formatSimulation(execution.simulation)),
                     el("div", {}, el("span", {}, "Started"), formatTime(execution.startedAt)),
                     el("div", {}, el("span", {}, "Finished"), formatTime(execution.finishedAt)),
                     el("div", {}, el("span", {}, "Duration"), formatDuration(execution.startedAt, execution.finishedAt))),
                 el("div", {id: "message"}),
                 retryButton,
+                el("h2", {}, "Gantt"),
+                gantt(execution),
                 el("h2", {}, "Timeline"),
                 el("ol", {class: "stages"}, ...timeline),
             ].filter(Boolean)); // replaceChildren() would render a null retryButton as the text "null"

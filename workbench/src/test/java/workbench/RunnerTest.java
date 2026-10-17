@@ -51,12 +51,12 @@ class RunnerTest {
 
     @Test
     void failedStepFailsExecutionAndLaterStepsAreNotAttempted() throws Exception {
-        long id = runner.start(new FailurePlan(3, 1));
+        long id = runner.start(Simulation.failing(3, 1));
 
         Execution execution = db.findExecution(id).orElseThrow();
         assertEquals("FAILED", execution.status());
         assertNotNull(execution.finishedAt());
-        assertEquals(new FailurePlan(3, 1), execution.failurePlan());
+        assertEquals(Simulation.failing(3, 1), execution.simulation());
 
         List<StepAttempt> attempts = execution.attempts();
         assertEquals(3, attempts.size(), "steps 4 and 5 must have no attempts");
