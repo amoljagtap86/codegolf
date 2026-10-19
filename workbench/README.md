@@ -1,13 +1,17 @@
 # Orchestration Reliability Workbench
 
-A small workbench that simulates a five-step business process, defined as a DAG, and records
-every execution and step attempt in PostgreSQL.
+A small workbench that simulates a monthly incentive compensation (IC) run, defined as a DAG of
+nine steps, and records every execution and step attempt in PostgreSQL.
 
 ```
-                 ┌─► RESERVE_INVENTORY ─┐
-VALIDATE_ORDER ──┤                      ├─► CREATE_SHIPMENT ─► SEND_CONFIRMATION
-                 └─► CHARGE_PAYMENT ────┘
+LOAD_SALES_DATA ──┐
+LOAD_ALIGNMENT  ──┼─► CREDIT_SALES ─┐
+LOAD_ROSTER     ──┘                 ├─► COMPUTE_ATTAINMENT ─► CALCULATE_PAYOUTS ─► REVIEW_PAYOUTS ─► PUBLISH_STATEMENTS
+LOAD_GOALS      ────────────────────┘
 ```
+
+The four feeds load in parallel. `REVIEW_PAYOUTS` is a pass-through for now; it becomes the
+payout anomaly gate in milestone 7. All steps are simulated: they do no real IC calculation.
 
 Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, PostgreSQL, JUnit 5.
 
@@ -19,6 +23,9 @@ Stack: Java 21, Maven, Jersey 3.1 (JAX-RS) on embedded Grizzly, plain JDBC, Post
 - [x] Milestone 4: execution history and web UI
 - [x] Milestone 5a: process as a DAG, run one step at a time
 - [x] Milestone 5b: run independent steps in parallel
+- [x] Milestone 6: the process is a monthly incentive compensation run
+- [ ] Milestone 7: payout anomaly gate in `REVIEW_PAYOUTS` (rule-based)
+- [ ] Milestone 8: Jev (TypeSafe AI) as the anomaly advisor, with the rule as fallback
 
 ## Prerequisites
 
@@ -75,11 +82,11 @@ Then open http://localhost:8080/ for the web UI (see below), or use the API:
 curl -i -X POST http://localhost:8080/api/executions   # start and run an execution
 curl http://localhost:8080/api/executions/1            # inspect it
 
-# simulate a failure: step 3 fails on its first attempt
+# simulate a failure: step 5 (CREDIT_SALES) fails on its first attempt
 curl -i -X POST http://localhost:8080/api/executions \
-     -H 'Content-Type: application/json' -d '{"failStep": 3, "failTimes": 1}'
+     -H 'Content-Type: application/json' -d '{"failStep": 5, "failTimes": 1}'
 
-# make every step take 400 ms so the parallel branches visibly overlap
+# make every step take 400 ms so the parallel feeds visibly overlap; LOAD_ALIGNMENT fails
 curl -i -X POST http://localhost:8080/api/executions \
      -H 'Content-Type: application/json' -d '{"failStep": 2, "stepDelayMs": 400}'
 
@@ -120,7 +127,7 @@ inserted with `textContent`/`createElement`, never `innerHTML`.
 {"failStep": 3, "failTimes": 1, "stepDelayMs": 400}
 ```
 
-- `failStep` (1–5): the step that fails.
+- `failStep` (1–9, the step's index in the process): the step that fails.
 - `failTimes` (≥ 1, default 1; requires `failStep`): how many attempts of that step fail before it succeeds.
 - `stepDelayMs` (0–5000, default 0): how long each successful attempt takes. A simulated failure is
   immediate, so when a step fails its parallel siblings are reliably still running.
@@ -128,26 +135,29 @@ inserted with `textContent`/`createElement`, never `innerHTML`.
   with `failTimes: 2` the first retry fails again.
 - No body: happy path without delay. Invalid values or malformed JSON: `400`, nothing is created.
 
-When a step fails, its attempt is marked `FAILED` with `errorMessage` and `errorDetail` (stack trace),
-the execution is marked `FAILED`, and later steps are not attempted (they have no attempt rows).
+When a step fails, its attempt is marked `FAILED` with `errorMessage` and `errorDetail` (stack trace).
+Steps already running in parallel finish; no other step starts; then the execution is marked
+`FAILED`. Steps that never started have no attempt rows.
 
 ### Process definition and scheduling
 
-The DAG is defined in code (`ProcessDefinition.ORDER`) and validated at startup: step names are
+The DAG is defined in code (`ProcessDefinition.IC_MONTHLY_RUN`) and validated at startup: step names are
 unique, and every dependency must name a step defined *earlier* in the list. That one rule rejects
 unknown dependencies and cycles, and makes definition order a valid execution order. `stage` is the
 dependency depth, used by the UI to group the timeline.
 
 - A step is **ready** when all its dependencies have succeeded and it has not run yet. Every ready
   step starts at once, each on its own virtual thread; the request thread coordinates: it waits for
-  any step to finish, then starts the steps that became ready. `RESERVE_INVENTORY` and
-  `CHARGE_PAYMENT` therefore run in parallel. Each run uses its own executor, and closing it waits
+  any step to finish, then starts the steps that became ready. The four `LOAD_*` feeds therefore
+  run in parallel. Each run uses its own executor, and closing it waits
   for every step, so no step outlives the request.
 - **Failure policy:** once a step fails, no further step starts, not even an independent one.
   Steps already running finish and are recorded; then the execution fails. Example: if
-  `RESERVE_INVENTORY` fails before `CHARGE_PAYMENT` started, the customer is not charged; if
-  `CHARGE_PAYMENT` was already running, it completes, and a retry does not charge again.
-- The graph is not versioned per execution: if it changes, retries of old executions use the new graph.
+  `LOAD_ALIGNMENT` fails while the other feeds load, they finish loading, crediting never starts,
+  and a retry reloads only the alignment feed. Statements are never published after a failure.
+- The graph is not versioned per execution. A retry checks that the execution's recorded step
+  names match the current definition and otherwise answers `409`; the UI shows such executions
+  under their recorded step names, without a Retry button.
 
 ### Retry semantics
 
@@ -167,6 +177,11 @@ dependency depth, used by the UI to group the timeline.
 
 ## Known limitations
 
+- Executions created before milestone 6 used a five-step order process. They are kept and
+  viewable, but cannot be retried. To start clean:
+  `psql "$DATABASE_URL" -c "TRUNCATE step_attempts, executions RESTART IDENTITY"`.
+- There are no schema migrations yet: `schema.sql` is applied on every startup and contains a
+  one-off `ALTER TABLE` for milestone 6; the simulation is still stored in a column named `failure_plan`.
 - An execution whose process crashes mid-run (e.g. the JVM dies or the database goes away) stays
   `RUNNING`; it cannot be retried (`409`) and there is no recovery yet.
 - Requests with an `Upgrade: h2c` header (Java's `HttpClient` with default settings, `curl --http2`)

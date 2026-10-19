@@ -5,6 +5,7 @@ import java.io.StringWriter;
 import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
@@ -24,7 +25,7 @@ public class Runner {
     private final ProcessDefinition process;
 
     public Runner(Db db) {
-        this(db, ProcessDefinition.ORDER);
+        this(db, ProcessDefinition.IC_MONTHLY_RUN);
     }
 
     Runner(Db db, ProcessDefinition process) {
@@ -49,11 +50,36 @@ public class Runner {
      * nothing, if the execution is unknown or not FAILED, including when a concurrent retry claimed it first.
      */
     public boolean retry(long executionId) throws SQLException {
+        Optional<Execution> execution = db.findExecution(executionId);
+        if (execution.isPresent()) {
+            requireSameProcess(execution.get());
+        }
         if (!db.claimForRetry(executionId)) {
             return false;
         }
-        run(executionId, db.findExecution(executionId).orElseThrow().simulation());
+        run(executionId, execution.orElseThrow().simulation());
         return true;
+    }
+
+    /**
+     * The process definition is not versioned per execution. An execution whose attempts were
+     * recorded under different steps (e.g. the order process before milestone 6) cannot be retried.
+     */
+    private void requireSameProcess(Execution execution) {
+        for (StepAttempt attempt : execution.attempts()) {
+            int index = attempt.stepIndex();
+            if (index > process.size() || !process.step(index).name().equals(attempt.stepName())) {
+                throw new IncompatibleExecutionException("Execution " + execution.id()
+                        + " was recorded under a different process definition (step " + index + " was "
+                        + attempt.stepName() + ") and cannot be retried");
+            }
+        }
+    }
+
+    static class IncompatibleExecutionException extends RuntimeException {
+        IncompatibleExecutionException(String message) {
+            super(message);
+        }
     }
 
     private record StepOutcome(StepDef step, boolean succeeded) {

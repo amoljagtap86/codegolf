@@ -17,8 +17,8 @@ public record Simulation(Integer failStep, Integer failTimes, Integer stepDelayM
 
     public Simulation {
         if (failStep != null) {
-            if (failStep < 1 || failStep > ProcessDefinition.ORDER.size()) {
-                throw new IllegalArgumentException("failStep must be between 1 and " + ProcessDefinition.ORDER.size());
+            if (failStep < 1 || failStep > ProcessDefinition.IC_MONTHLY_RUN.size()) {
+                throw new IllegalArgumentException("failStep must be between 1 and " + ProcessDefinition.IC_MONTHLY_RUN.size());
             }
             if (failTimes == null) {
                 failTimes = 1;

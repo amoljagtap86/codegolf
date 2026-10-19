@@ -47,11 +47,20 @@ public class ExecutionResource {
         return db.listExecutions(limit);
     }
 
-    /** Retries a FAILED execution from its failed step. 409 if not FAILED (incl. a concurrent retry won). */
+    /**
+     * Retries a FAILED execution from its failed step. 409 if not FAILED (incl. a concurrent retry won)
+     * or if it was recorded under a different process definition.
+     */
     @POST
     @Path("{id}/retry")
     public Execution retry(@PathParam("id") long id) throws SQLException {
-        if (!runner.retry(id)) {
+        boolean retried;
+        try {
+            retried = runner.retry(id);
+        } catch (Runner.IncompatibleExecutionException e) {
+            throw error(Response.Status.CONFLICT, e.getMessage());
+        }
+        if (!retried) {
             Execution execution = get(id); // 404 if unknown
             throw error(Response.Status.CONFLICT,
                     "Execution " + id + " is " + execution.status() + "; only FAILED executions can be retried");
@@ -63,7 +72,7 @@ public class ExecutionResource {
     @GET
     @Path("steps")
     public List<ProcessDefinition.StepDef> steps() {
-        return ProcessDefinition.ORDER.steps();
+        return ProcessDefinition.IC_MONTHLY_RUN.steps();
     }
 
     /** Error response with a JSON body {"error": message}. */

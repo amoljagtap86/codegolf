@@ -46,7 +46,7 @@ class ExecutionApiTest {
 
         HttpResponse<String> fetched = send(HttpRequest.newBuilder(URI.create(location)).GET().build());
         assertEquals(200, fetched.statusCode());
-        assertTrue(fetched.body().contains("\"stepName\":\"SEND_CONFIRMATION\""), fetched.body());
+        assertTrue(fetched.body().contains("\"stepName\":\"PUBLISH_STATEMENTS\""), fetched.body());
     }
 
     @Test
@@ -55,12 +55,12 @@ class ExecutionApiTest {
         assertEquals(201, created.statusCode());
         assertTrue(created.body().contains("\"status\":\"FAILED\""), created.body());
         assertTrue(created.body().contains("\"simulation\":{\"failStep\":2,\"failTimes\":1,\"stepDelayMs\":0}"), created.body());
-        assertTrue(created.body().contains("\"errorMessage\":\"RESERVE_INVENTORY failed"), created.body());
+        assertTrue(created.body().contains("\"errorMessage\":\"LOAD_ALIGNMENT failed"), created.body());
     }
 
     @Test
     void invalidSimulationReturns400AndCreatesNothing() throws Exception {
-        assertEquals(400, postJson("{\"failStep\": 7}").statusCode());
+        assertEquals(400, postJson("{\"failStep\": 10}").statusCode());
         assertEquals(400, postJson("{\"failStep\": 1, \"failTimes\": 0}").statusCode());
         assertEquals(400, postJson("{not json").statusCode());
 
@@ -83,6 +83,20 @@ class ExecutionApiTest {
         assertTrue(again.headers().firstValue("Content-Type").orElse("").startsWith("application/json"));
         assertTrue(again.body().contains("Execution 1 is SUCCEEDED; only FAILED executions can be retried"),
                 again.body());
+    }
+
+    @Test
+    void retryOfExecutionFromAnOlderProcessDefinitionReturns409() throws Exception {
+        // As recorded before milestone 6: step 1 was VALIDATE_ORDER and failed.
+        Db db = TestDb.existing();
+        long id = db.insertRunningExecution(null);
+        db.failAttempt(db.insertRunningAttempt(id, 1, "VALIDATE_ORDER", 1), "old failure", null);
+        db.finishExecution(id, "FAILED");
+
+        HttpResponse<String> response = post("/api/executions/" + id + "/retry");
+        assertEquals(409, response.statusCode());
+        assertTrue(response.body().contains("was recorded under a different process definition"), response.body());
+        assertTrue(get("/api/executions/" + id).body().contains("\"status\":\"FAILED\""), "left unchanged");
     }
 
     @Test
@@ -119,7 +133,7 @@ class ExecutionApiTest {
 
     @Test
     void listReturnsNewestFirstWithAttemptAndRetryCounts() throws Exception {
-        assertEquals(201, post("/api/executions").statusCode());               // 1: 5 attempts, 0 retries
+        assertEquals(201, post("/api/executions").statusCode());               // 1: 9 attempts, 0 retries
         assertEquals(201, postJson("{\"failStep\": 2, \"failTimes\": 2}").statusCode()); // 2: FAILED
         assertEquals(200, post("/api/executions/2/retry").statusCode());       // 2: FAILED again
         assertEquals(200, post("/api/executions/2/retry").statusCode());       // 2: SUCCEEDED
@@ -128,10 +142,10 @@ class ExecutionApiTest {
         assertEquals(200, response.statusCode());
         String body = response.body();
         assertTrue(body.indexOf("\"id\":2") < body.indexOf("\"id\":1"), "newest first: " + body);
-        // Execution 2: step 1 once, step 2 three times, steps 3-5 once = 7 attempts, 2 retries.
+        // Execution 2: LOAD_ALIGNMENT three times, the other 8 steps once = 11 attempts, 2 retries.
         assertTrue(body.contains("\"id\":2,\"status\":\"SUCCEEDED\",\"simulation\":{\"failStep\":2,\"failTimes\":2,\"stepDelayMs\":0}"), body);
-        assertTrue(body.contains("\"attemptCount\":7,\"retryCount\":2"), body);
-        assertTrue(body.contains("\"attemptCount\":5,\"retryCount\":0"), body);
+        assertTrue(body.contains("\"attemptCount\":11,\"retryCount\":2"), body);
+        assertTrue(body.contains("\"attemptCount\":9,\"retryCount\":0"), body);
         assertTrue(body.contains("\"simulation\":null"), body);
     }
 
@@ -150,9 +164,9 @@ class ExecutionApiTest {
     @Test
     void stepsReturnsProcessDefinition() throws Exception {
         String body = get("/api/executions/steps").body();
-        assertTrue(body.startsWith("[{\"index\":1,\"name\":\"VALIDATE_ORDER\",\"dependsOn\":[],\"stage\":1}"), body);
+        assertTrue(body.startsWith("[{\"index\":1,\"name\":\"LOAD_SALES_DATA\",\"dependsOn\":[],\"stage\":1}"), body);
         assertTrue(body.contains(
-                "{\"index\":4,\"name\":\"CREATE_SHIPMENT\",\"dependsOn\":[\"RESERVE_INVENTORY\",\"CHARGE_PAYMENT\"],\"stage\":3}"),
+                "{\"index\":5,\"name\":\"CREDIT_SALES\",\"dependsOn\":[\"LOAD_SALES_DATA\",\"LOAD_ALIGNMENT\",\"LOAD_ROSTER\"],\"stage\":2}"),
                 body);
     }
 

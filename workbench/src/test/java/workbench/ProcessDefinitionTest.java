@@ -11,14 +11,19 @@ import workbench.ProcessDefinition.StepDef;
 class ProcessDefinitionTest {
 
     @Test
-    void orderProcessIsTheExpectedDiamond() {
+    void icMonthlyRunIsTheExpectedGraph() {
+        List<String> crediting = List.of("LOAD_SALES_DATA", "LOAD_ALIGNMENT", "LOAD_ROSTER");
         assertEquals(List.of(
-                new StepDef(1, "VALIDATE_ORDER", List.of(), 1),
-                new StepDef(2, "RESERVE_INVENTORY", List.of("VALIDATE_ORDER"), 2),
-                new StepDef(3, "CHARGE_PAYMENT", List.of("VALIDATE_ORDER"), 2),
-                new StepDef(4, "CREATE_SHIPMENT", List.of("RESERVE_INVENTORY", "CHARGE_PAYMENT"), 3),
-                new StepDef(5, "SEND_CONFIRMATION", List.of("CREATE_SHIPMENT"), 4)),
-                ProcessDefinition.ORDER.steps());
+                new StepDef(1, "LOAD_SALES_DATA", List.of(), 1),
+                new StepDef(2, "LOAD_ALIGNMENT", List.of(), 1),
+                new StepDef(3, "LOAD_ROSTER", List.of(), 1),
+                new StepDef(4, "LOAD_GOALS", List.of(), 1),
+                new StepDef(5, "CREDIT_SALES", crediting, 2),
+                new StepDef(6, "COMPUTE_ATTAINMENT", List.of("CREDIT_SALES", "LOAD_GOALS"), 3),
+                new StepDef(7, "CALCULATE_PAYOUTS", List.of("COMPUTE_ATTAINMENT"), 4),
+                new StepDef(8, "REVIEW_PAYOUTS", List.of("CALCULATE_PAYOUTS"), 5),
+                new StepDef(9, "PUBLISH_STATEMENTS", List.of("REVIEW_PAYOUTS"), 6)),
+                ProcessDefinition.IC_MONTHLY_RUN.steps());
     }
 
     @Test

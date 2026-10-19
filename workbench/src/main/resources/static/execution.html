@@ -62,7 +62,10 @@
 
         function render(execution) {
             document.title = `Execution #${execution.id} · Orchestration Workbench`;
-            const retryButton = execution.status === "FAILED"
+            // Recorded under an older process definition (e.g. before milestone 6)? Then step indexes
+            // mean other steps: show attempts under their recorded names, and no retry (the server refuses it).
+            const legacy = execution.attempts.some(a => !steps[a.stepIndex - 1] || steps[a.stepIndex - 1].name !== a.stepName);
+            const retryButton = execution.status === "FAILED" && !legacy
                 ? el("button", {id: "retry", type: "button", class: "primary"}, "Retry from failed step")
                 : null;
 
@@ -81,8 +84,15 @@
                             : "Not started yet"));
             };
 
-            const stageCount = Math.max(...steps.map(s => s.stage));
             const timeline = [];
+            if (legacy) {
+                const recorded = [...new Map(execution.attempts.map(a => [a.stepIndex,
+                    {index: a.stepIndex, name: a.stepName, dependsOn: []}])).values()];
+                timeline.push(el("li", {class: "stage"},
+                    el("div", {class: "stage-title"}, "Recorded steps"),
+                    el("ol", {class: "timeline"}, ...recorded.map(stepCard))));
+            }
+            const stageCount = legacy ? 0 : Math.max(...steps.map(s => s.stage));
             for (let stage = 1; stage <= stageCount; stage++) {
                 const inStage = steps.filter(s => s.stage === stage);
                 timeline.push(el("li", {class: "stage"},
@@ -98,7 +108,9 @@
                     el("div", {}, el("span", {}, "Started"), formatTime(execution.startedAt)),
                     el("div", {}, el("span", {}, "Finished"), formatTime(execution.finishedAt)),
                     el("div", {}, el("span", {}, "Duration"), formatDuration(execution.startedAt, execution.finishedAt))),
-                el("div", {id: "message"}),
+                el("div", {id: "message"}, legacy ? el("p", {class: "muted"},
+                    "This execution was recorded under an older process definition. Its attempts are shown "
+                    + "under their recorded step names; it cannot be retried.") : null),
                 retryButton,
                 el("h2", {}, "Gantt"),
                 gantt(execution),

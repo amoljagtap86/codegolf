@@ -19,13 +19,21 @@ public final class ProcessDefinition {
     public record StepDef(int index, String name, List<String> dependsOn, int stage) {
     }
 
-    /** The simulated order process: inventory and payment both depend only on validation. */
-    public static final ProcessDefinition ORDER = new ProcessDefinition(List.of(
-            List.of("VALIDATE_ORDER"),
-            List.of("RESERVE_INVENTORY", "VALIDATE_ORDER"),
-            List.of("CHARGE_PAYMENT", "VALIDATE_ORDER"),
-            List.of("CREATE_SHIPMENT", "RESERVE_INVENTORY", "CHARGE_PAYMENT"),
-            List.of("SEND_CONFIRMATION", "CREATE_SHIPMENT")));
+    /**
+     * A simulated monthly incentive compensation run. The four input feeds load in parallel;
+     * crediting needs sales, alignment and roster; attainment also needs goals. REVIEW_PAYOUTS is
+     * where payouts are checked before statements go out (a pass-through until milestone 7).
+     */
+    public static final ProcessDefinition IC_MONTHLY_RUN = new ProcessDefinition(List.of(
+            List.of("LOAD_SALES_DATA"),
+            List.of("LOAD_ALIGNMENT"),
+            List.of("LOAD_ROSTER"),
+            List.of("LOAD_GOALS"),
+            List.of("CREDIT_SALES", "LOAD_SALES_DATA", "LOAD_ALIGNMENT", "LOAD_ROSTER"),
+            List.of("COMPUTE_ATTAINMENT", "CREDIT_SALES", "LOAD_GOALS"),
+            List.of("CALCULATE_PAYOUTS", "COMPUTE_ATTAINMENT"),
+            List.of("REVIEW_PAYOUTS", "CALCULATE_PAYOUTS"),
+            List.of("PUBLISH_STATEMENTS", "REVIEW_PAYOUTS")));
 
     private final List<StepDef> steps = new ArrayList<>();
 

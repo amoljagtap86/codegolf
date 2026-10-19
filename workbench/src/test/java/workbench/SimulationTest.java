@@ -26,7 +26,7 @@ class SimulationTest {
     @Test
     void rejectsInvalidSimulations() {
         assertThrows(IllegalArgumentException.class, () -> new Simulation(0, 1, null));
-        assertThrows(IllegalArgumentException.class, () -> new Simulation(6, 1, null));
+        assertThrows(IllegalArgumentException.class, () -> new Simulation(10, 1, null));
         assertThrows(IllegalArgumentException.class, () -> new Simulation(3, 0, null));
         assertThrows(IllegalArgumentException.class, () -> new Simulation(null, 2, null)); // failTimes needs failStep
         assertThrows(IllegalArgumentException.class, () -> new Simulation(null, null, -1));

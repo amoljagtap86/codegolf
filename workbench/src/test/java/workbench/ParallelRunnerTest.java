@@ -10,12 +10,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Parallel execution of the order process, where RESERVE_INVENTORY (2) and CHARGE_PAYMENT (3)
- * both depend only on VALIDATE_ORDER. A step delay makes their overlap measurable.
+ * Parallel execution of the IC monthly run, whose four LOAD_* steps have no dependencies.
+ * A step delay makes their overlap measurable.
  */
 class ParallelRunnerTest {
 
     private static final int DELAY_MS = 300;
+    private static final List<String> LOADS = List.of("LOAD_SALES_DATA", "LOAD_ALIGNMENT", "LOAD_ROSTER", "LOAD_GOALS");
 
     private Db db;
     private Runner runner;
@@ -27,50 +28,61 @@ class ParallelRunnerTest {
     }
 
     @Test
-    void independentStepsRunInParallelAndDependenciesAreRespected() throws Exception {
+    void feedsLoadInParallelAndDependenciesAreRespected() throws Exception {
         long id = runner.start(new Simulation(null, null, DELAY_MS));
 
         Execution execution = db.findExecution(id).orElseThrow();
         assertEquals("SUCCEEDED", execution.status());
-        StepAttempt reserve = attempt(execution, "RESERVE_INVENTORY", 1);
-        StepAttempt charge = attempt(execution, "CHARGE_PAYMENT", 1);
-        // Overlap: each started before the other finished.
-        assertTrue(reserve.startedAt().isBefore(charge.finishedAt()), "reserve started after charge finished");
-        assertTrue(charge.startedAt().isBefore(reserve.finishedAt()), "charge started after reserve finished");
-        // CREATE_SHIPMENT waited for both.
-        StepAttempt shipment = attempt(execution, "CREATE_SHIPMENT", 1);
-        assertFalse(shipment.startedAt().isBefore(reserve.finishedAt()));
-        assertFalse(shipment.startedAt().isBefore(charge.finishedAt()));
+        // Overlap: every load started before every other load finished.
+        for (String a : LOADS) {
+            for (String b : LOADS) {
+                assertTrue(attempt(execution, a, 1).startedAt().isBefore(attempt(execution, b, 1).finishedAt()),
+                        a + " started after " + b + " finished");
+            }
+        }
+        // CREDIT_SALES waited for its three feeds; COMPUTE_ATTAINMENT for crediting and goals.
+        assertStartsAfter(execution, "CREDIT_SALES", "LOAD_SALES_DATA", "LOAD_ALIGNMENT", "LOAD_ROSTER");
+        assertStartsAfter(execution, "COMPUTE_ATTAINMENT", "CREDIT_SALES", "LOAD_GOALS");
     }
 
     @Test
-    void siblingRunningWhenAStepFailsCompletesAndNothingNewStarts() throws Exception {
-        long id = runner.start(new Simulation(2, 1, DELAY_MS)); // RESERVE_INVENTORY fails at once
+    void feedsRunningWhenOneFeedFailsCompleteAndNothingNewStarts() throws Exception {
+        long id = runner.start(new Simulation(2, 1, DELAY_MS)); // LOAD_ALIGNMENT fails at once
 
         Execution execution = db.findExecution(id).orElseThrow();
         assertEquals("FAILED", execution.status());
-        assertEquals("1#1:SUCCEEDED 2#1:FAILED 3#1:SUCCEEDED", timeline(execution));
+        assertEquals("1#1:SUCCEEDED 2#1:FAILED 3#1:SUCCEEDED 4#1:SUCCEEDED", timeline(execution));
 
-        StepAttempt reserve = attempt(execution, "RESERVE_INVENTORY", 1);
-        StepAttempt charge = attempt(execution, "CHARGE_PAYMENT", 1);
-        // CHARGE_PAYMENT was mid-flight when RESERVE_INVENTORY failed, and was allowed to finish.
-        assertTrue(charge.startedAt().isBefore(reserve.finishedAt()));
-        assertTrue(charge.finishedAt().isAfter(reserve.finishedAt()));
-        // The execution is marked FAILED only after the running sibling finished.
-        assertFalse(execution.finishedAt().isBefore(charge.finishedAt()));
+        StepAttempt alignment = attempt(execution, "LOAD_ALIGNMENT", 1);
+        for (String load : List.of("LOAD_SALES_DATA", "LOAD_ROSTER", "LOAD_GOALS")) {
+            StepAttempt other = attempt(execution, load, 1);
+            // Mid-flight when LOAD_ALIGNMENT failed, and allowed to finish.
+            assertTrue(other.startedAt().isBefore(alignment.finishedAt()), load);
+            assertTrue(other.finishedAt().isAfter(alignment.finishedAt()), load);
+            // The execution is marked FAILED only after the running feeds finished.
+            assertFalse(execution.finishedAt().isBefore(other.finishedAt()), load);
+        }
     }
 
     @Test
-    void retryAfterParallelFailureRunsOnlyTheFailedBranchAndWhatDependsOnIt() throws Exception {
+    void retryAfterParallelFailureReloadsOnlyTheFailedFeed() throws Exception {
         long id = runner.start(new Simulation(2, 1, DELAY_MS));
 
         assertTrue(runner.retry(id));
 
         Execution execution = db.findExecution(id).orElseThrow();
         assertEquals("SUCCEEDED", execution.status());
-        // CHARGE_PAYMENT is not charged twice.
-        assertEquals("1#1:SUCCEEDED 2#1:FAILED 2#2:SUCCEEDED 3#1:SUCCEEDED 4#1:SUCCEEDED 5#1:SUCCEEDED",
-                timeline(execution));
+        // Sales, roster and goals are not reloaded.
+        assertEquals("1#1:SUCCEEDED 2#1:FAILED 2#2:SUCCEEDED 3#1:SUCCEEDED 4#1:SUCCEEDED "
+                + "5#1:SUCCEEDED 6#1:SUCCEEDED 7#1:SUCCEEDED 8#1:SUCCEEDED 9#1:SUCCEEDED", timeline(execution));
+    }
+
+    private static void assertStartsAfter(Execution execution, String step, String... dependencies) {
+        StepAttempt attempt = attempt(execution, step, 1);
+        for (String dependency : dependencies) {
+            assertFalse(attempt.startedAt().isBefore(attempt(execution, dependency, 1).finishedAt()),
+                    step + " started before " + dependency + " finished");
+        }
     }
 
     private static StepAttempt attempt(Execution execution, String stepName, int attemptNo) {
@@ -80,8 +92,7 @@ class ParallelRunnerTest {
     }
 
     private static String timeline(Execution execution) {
-        List<StepAttempt> attempts = execution.attempts();
-        return attempts.stream()
+        return execution.attempts().stream()
                 .map(a -> a.stepIndex() + "#" + a.attemptNo() + ":" + a.status())
                 .collect(Collectors.joining(" "));
     }

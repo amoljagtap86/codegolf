@@ -31,7 +31,7 @@ public class Main {
      * from src/main/resources/static under /. Port 0 picks a free port (used by tests).
      */
     static HttpServer start(Db db, int port) throws Exception {
-        ProcessDefinition.ORDER.size(); // loads, and so validates, the process DAG before serving anything
+        ProcessDefinition.IC_MONTHLY_RUN.size(); // loads, and so validates, the process DAG before serving anything
         db.applySchema();
         ResourceConfig config = new ResourceConfig()
                 .register(JsonConfig.class)

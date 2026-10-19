@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS executions (
 CREATE TABLE IF NOT EXISTS step_attempts (
     id            bigserial   PRIMARY KEY,
     execution_id  bigint      NOT NULL REFERENCES executions (id),
-    step_index    int         NOT NULL CHECK (step_index BETWEEN 1 AND 5),
+    step_index    int         NOT NULL CHECK (step_index >= 1), -- position in ProcessDefinition
     step_name     text        NOT NULL,
     attempt_no    int         NOT NULL CHECK (attempt_no >= 1),
     status        text        NOT NULL CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
@@ -23,3 +23,8 @@ CREATE TABLE IF NOT EXISTS step_attempts (
     finished_at   timestamptz,
     UNIQUE (execution_id, step_index, attempt_no)
 );
+
+-- Milestone 6: the process grew beyond 5 steps. Databases created earlier still carry
+-- CHECK (step_index BETWEEN 1 AND 5); replace it. Idempotent, but a stopgap until real migrations.
+ALTER TABLE step_attempts DROP CONSTRAINT IF EXISTS step_attempts_step_index_check;
+ALTER TABLE step_attempts ADD CONSTRAINT step_attempts_step_index_check CHECK (step_index >= 1);

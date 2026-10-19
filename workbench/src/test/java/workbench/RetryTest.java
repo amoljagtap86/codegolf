@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -29,7 +30,7 @@ class RetryTest {
 
     @Test
     void retryResumesAtFailedStepWithoutRerunningEarlierSteps() throws Exception {
-        long id = runner.start(Simulation.failing(3, 1));
+        long id = runner.start(Simulation.failing(5, 1)); // CREDIT_SALES
         Execution failed = db.findExecution(id).orElseThrow();
 
         assertTrue(runner.retry(id));
@@ -38,7 +39,7 @@ class RetryTest {
         assertEquals("SUCCEEDED", execution.status());
         assertEquals(failed.startedAt(), execution.startedAt(), "started_at keeps the original start");
         assertNotNull(execution.finishedAt());
-        assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:FAILED 3#2:SUCCEEDED 4#1:SUCCEEDED 5#1:SUCCEEDED",
+        assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:SUCCEEDED 4#1:SUCCEEDED 5#1:FAILED 5#2:SUCCEEDED 6#1:SUCCEEDED 7#1:SUCCEEDED 8#1:SUCCEEDED 9#1:SUCCEEDED",
                 timeline(execution));
         // The original failed attempt is history, kept as it was.
         assertEquals(failed.attempts().get(2), execution.attempts().get(2));
@@ -46,19 +47,19 @@ class RetryTest {
 
     @Test
     void retryThatFailsAgainRecordsNewAttemptAndCanBeRetriedAgain() throws Exception {
-        long id = runner.start(Simulation.failing(3, 2));
+        long id = runner.start(Simulation.failing(5, 2)); // CREDIT_SALES
 
         assertTrue(runner.retry(id));
         Execution afterFirstRetry = db.findExecution(id).orElseThrow();
         assertEquals("FAILED", afterFirstRetry.status());
-        assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:FAILED 3#2:FAILED", timeline(afterFirstRetry));
-        assertEquals("CHARGE_PAYMENT failed (simulated failure 2 of 2)",
-                afterFirstRetry.attempts().get(3).errorMessage());
+        assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:SUCCEEDED 4#1:SUCCEEDED 5#1:FAILED 5#2:FAILED", timeline(afterFirstRetry));
+        assertEquals("CREDIT_SALES failed (simulated failure 2 of 2)",
+                afterFirstRetry.attempts().get(5).errorMessage());
 
         assertTrue(runner.retry(id));
         Execution afterSecondRetry = db.findExecution(id).orElseThrow();
         assertEquals("SUCCEEDED", afterSecondRetry.status());
-        assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:FAILED 3#2:FAILED 3#3:SUCCEEDED 4#1:SUCCEEDED 5#1:SUCCEEDED",
+        assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:SUCCEEDED 4#1:SUCCEEDED 5#1:FAILED 5#2:FAILED 5#3:SUCCEEDED 6#1:SUCCEEDED 7#1:SUCCEEDED 8#1:SUCCEEDED 9#1:SUCCEEDED",
                 timeline(afterSecondRetry));
     }
 
@@ -85,6 +86,23 @@ class RetryTest {
     }
 
     @Test
+    void retryOfExecutionFromAnOlderProcessDefinitionIsRefusedAndChangesNothing() throws Exception {
+        // As recorded before milestone 6: step 2 was RESERVE_INVENTORY and failed.
+        long id = db.insertRunningExecution(null);
+        db.finishAttempt(db.insertRunningAttempt(id, 1, "VALIDATE_ORDER", 1), "SUCCEEDED");
+        db.failAttempt(db.insertRunningAttempt(id, 2, "RESERVE_INVENTORY", 1), "old failure", null);
+        db.finishExecution(id, "FAILED");
+        Execution before = db.findExecution(id).orElseThrow();
+
+        Runner.IncompatibleExecutionException e =
+                assertThrows(Runner.IncompatibleExecutionException.class, () -> runner.retry(id));
+
+        assertEquals("Execution " + id + " was recorded under a different process definition"
+                + " (step 1 was VALIDATE_ORDER) and cannot be retried", e.getMessage());
+        assertEquals(before, db.findExecution(id).orElseThrow(), "not claimed, no attempts added");
+    }
+
+    @Test
     void retryOfUnknownExecutionIsRejected() throws Exception {
         assertFalse(runner.retry(999));
         assertNull(db.findExecution(999).orElse(null));
@@ -101,7 +119,7 @@ class RetryTest {
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         try {
             for (int round = 0; round < 10; round++) {
-                long id = runner.start(Simulation.failing(3, 1));
+                long id = runner.start(Simulation.failing(5, 1)); // CREDIT_SALES
                 CyclicBarrier barrier = new CyclicBarrier(threads);
                 List<Future<Boolean>> results = new ArrayList<>();
                 for (int t = 0; t < threads; t++) {
@@ -119,7 +137,7 @@ class RetryTest {
                 assertEquals(1, winners, "round " + round);
                 Execution execution = db.findExecution(id).orElseThrow();
                 assertEquals("SUCCEEDED", execution.status(), "round " + round);
-                assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:FAILED 3#2:SUCCEEDED 4#1:SUCCEEDED 5#1:SUCCEEDED",
+                assertEquals("1#1:SUCCEEDED 2#1:SUCCEEDED 3#1:SUCCEEDED 4#1:SUCCEEDED 5#1:FAILED 5#2:SUCCEEDED 6#1:SUCCEEDED 7#1:SUCCEEDED 8#1:SUCCEEDED 9#1:SUCCEEDED",
                         timeline(execution), "round " + round);
             }
         } finally {

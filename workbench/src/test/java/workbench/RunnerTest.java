@@ -22,7 +22,7 @@ class RunnerTest {
     }
 
     @Test
-    void normalExecutionRunsAllFiveStepsOnceInOrder() throws Exception {
+    void normalExecutionRunsEveryStepOnceRespectingDependencies() throws Exception {
         long id = runner.start(null);
 
         Execution execution = db.findExecution(id).orElseThrow();
@@ -32,17 +32,17 @@ class RunnerTest {
         assertFalse(execution.finishedAt().isBefore(execution.startedAt()));
 
         List<StepAttempt> attempts = execution.attempts();
-        assertEquals(5, attempts.size());
+        assertEquals(ProcessDefinition.IC_MONTHLY_RUN.size(), attempts.size());
         for (int i = 0; i < attempts.size(); i++) {
             StepAttempt attempt = attempts.get(i);
             assertEquals(i + 1, attempt.stepIndex());
-            assertEquals(ProcessDefinition.ORDER.step(i + 1).name(), attempt.stepName());
+            assertEquals(ProcessDefinition.IC_MONTHLY_RUN.step(i + 1).name(), attempt.stepName());
             assertEquals(1, attempt.attemptNo());
             assertEquals("SUCCEEDED", attempt.status());
             assertNull(attempt.errorMessage());
             assertNotNull(attempt.finishedAt());
             // DAG order: a step never starts before all of its dependencies finished.
-            for (String dependency : ProcessDefinition.ORDER.step(i + 1).dependsOn()) {
+            for (String dependency : ProcessDefinition.IC_MONTHLY_RUN.step(i + 1).dependsOn()) {
                 StepAttempt dep = attempts.stream().filter(a -> a.stepName().equals(dependency)).findFirst().orElseThrow();
                 assertFalse(attempt.startedAt().isBefore(dep.finishedAt()), attempt.stepName() + " before " + dependency);
             }
@@ -51,25 +51,26 @@ class RunnerTest {
 
     @Test
     void failedStepFailsExecutionAndLaterStepsAreNotAttempted() throws Exception {
-        long id = runner.start(Simulation.failing(3, 1));
+        long id = runner.start(Simulation.failing(5, 1)); // CREDIT_SALES, after all four loads
 
         Execution execution = db.findExecution(id).orElseThrow();
         assertEquals("FAILED", execution.status());
         assertNotNull(execution.finishedAt());
-        assertEquals(Simulation.failing(3, 1), execution.simulation());
+        assertEquals(Simulation.failing(5, 1), execution.simulation());
 
         List<StepAttempt> attempts = execution.attempts();
-        assertEquals(3, attempts.size(), "steps 4 and 5 must have no attempts");
-        assertEquals("SUCCEEDED", attempts.get(0).status());
-        assertEquals("SUCCEEDED", attempts.get(1).status());
+        assertEquals(5, attempts.size(), "steps after CREDIT_SALES must have no attempts");
+        for (int i = 0; i < 4; i++) {
+            assertEquals("SUCCEEDED", attempts.get(i).status(), attempts.get(i).stepName());
+        }
 
-        StepAttempt failed = attempts.get(2);
-        assertEquals(3, failed.stepIndex());
-        assertEquals("CHARGE_PAYMENT", failed.stepName());
+        StepAttempt failed = attempts.get(4);
+        assertEquals(5, failed.stepIndex());
+        assertEquals("CREDIT_SALES", failed.stepName());
         assertEquals(1, failed.attemptNo());
         assertEquals("FAILED", failed.status());
         assertNotNull(failed.finishedAt());
-        assertEquals("CHARGE_PAYMENT failed (simulated failure 1 of 1)", failed.errorMessage());
+        assertEquals("CREDIT_SALES failed (simulated failure 1 of 1)", failed.errorMessage());
         assertTrue(failed.errorDetail().contains("SimulatedStepFailure"), failed.errorDetail());
     }
 
